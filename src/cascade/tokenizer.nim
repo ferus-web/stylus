@@ -122,6 +122,120 @@ proc consumeWhitespace*(tokenizer: Tokenizer, newline: bool): Token {.discardabl
     wsStr: tokenizer.sliceFrom(startPos)
   )
 
+proc isIdentStart*(tokenizer: Tokenizer): bool {.inline.} =
+  if tokenizer.isEof():
+    return false
+
+  case tokenizer.nextChar()
+  of {'a'..'z'}, {'A'..'Z'}, '_', '\0': return true
+  of '-':
+    if not tokenizer.hasAtLeast(1):
+      return false
+
+    case tokenizer.charAt(1)
+    of {'a'..'z'}, {'A'..'Z'}, '-', '_', '\0':
+      return true
+    of '\\':
+      return not tokenizer.hasNewlineAt(1)
+    else:
+      return not tokenizer.charAt(1).isAlphaAscii()
+  of '\\':
+    return not tokenizer.hasNewlineAt(1)
+  else:
+    return not tokenizer.charAt(1).isAlphaAscii()
+
+
+proc checkForSourceMap*(
+  tokenizer: Tokenizer,
+  contents: string
+) =
+  let
+    directive = "# sourceMappingURL="
+    directiveOld = "@ sourceMappingURL="
+
+  if contents.startsWith(directive) or contents.startsWith(directiveOld):
+    let contents = contents[directive.len..contents.len]
+    tokenizer.sourceMapUrl = contents.some() # FIXME: this is not compliant!
+  
+  let
+    directiveB = "# sourceURL="
+    directiveBOld = "@ sourceURL="
+
+  if contents.startsWith(directiveB) or contents.startsWith(directiveBOld):
+    let contents = contents[directiveB.len..contents.len]
+    tokenizer.sourceUrl = contents.some() # FIXME: this is not compliant!
+
+proc consumeContinuationByte*(
+  tokenizer: Tokenizer
+) {.inline.} =
+  inc tokenizer.currLineStartPos
+  inc tokenizer.pos
+
+proc consume4byteIntro*(
+  tokenizer: Tokenizer
+) {.inline.} =
+  dec tokenizer.currLineStartPos
+  inc tokenizer.pos
+
+proc consumeEscape*(
+  tokenizer: Tokenizer
+): char =
+  # TODO: implement this thing
+  ' '
+
+proc consumeEscapeAndWrite*(
+  tokenizer: Tokenizer,
+  str: var string
+) {.inline.} =
+  str &= tokenizer.consumeEscape()
+
+proc consumeName*(tokenizer: Tokenizer): string =
+  let start = tokenizer.pos
+  var value: string
+  
+  while true:
+    if tokenizer.isEof():
+      return tokenizer.sliceFrom(start)
+
+    case tokenizer.nextChar()
+    of {'a'..'z'}, {'A'..'Z'}, {'0'..'9'}, '_', '-':
+      tokenizer.forwards(1)
+    of '\\', '\0':
+      value = tokenizer.sliceFrom(start)
+    of {'\x80'..'\xBF'}: tokenizer.consumeContinuationByte()
+    of {'\xC0'..'\xEF'}: tokenizer.forwards(1)
+    of {'\xF0'..'\xFF'}: tokenizer.consume4byteIntro()
+    else:
+      return tokenizer.sliceFrom(start)
+
+  while not tokenizer.isEof():
+    let c = tokenizer.nextChar()
+    case c
+    of {'a'..'z'}, {'A'..'Z'}, {'0'..'9'}, '_', '-':
+      tokenizer.forwards(1)
+      value &= c
+    of '\\':
+      if tokenizer.hasNewlineAt(1): break
+      tokenizer.forwards(1)
+
+      tokenizer.consumeEscapeAndWrite(value)
+    of '\0':
+      tokenizer.forwards(1)
+      value &= "\u{FFFD}"
+    of {'\x80'..'\xBF'}:
+      tokenizer.consumeContinuationByte()
+      value &= c
+    of {'\xC0'..'\xEF'}:
+      tokenizer.forwards(1)
+      value &= c
+    of {'\xF0'..'\xFF'}:
+      tokenizer.consume4byteIntro()
+      value &= c
+    else:
+      break
+  
+  value
+
 proc consumeNumeric*(
   tokenizer: Tokenizer
 ): Token =
@@ -202,49 +316,43 @@ proc consumeNumeric*(
 
           value *= pow(10'f64, sign * exponent)
 
-proc checkForSourceMap*(
-  tokenizer: Tokenizer,
-  contents: string
-) =
-  let
-    directive = "# sourceMappingURL="
-    directiveOld = "@ sourceMappingURL="
+  var intValue: Option[int32]
 
-  if contents.startsWith(directive) or contents.startsWith(directiveOld):
-    let contents = contents[directive.len..contents.len]
-    tokenizer.sourceMapUrl = contents.some() # FIXME: this is not compliant!
+  if isInteger: 
+    intValue = some(
+      if value >= int32.high.float64: int32.high
+      elif value <= int32.low.float64: int32.low
+      else:
+        value.int32
+    )
   
-  let
-    directiveB = "# sourceURL="
-    directiveBOld = "@ sourceURL="
+  if not tokenizer.isEof() and tokenizer.nextChar() == '%':
+    tokenizer.forwards(1)
+    return Token(
+      kind: tkPercentage,
+      pHasSign: hasSign,
+      pIntVal: intValue,
+      pUnitValue: (value / 100'f64).float32
+    )
 
-  if contents.startsWith(directiveB) or contents.startsWith(directiveBOld):
-    let contents = contents[directiveB.len..contents.len]
-    tokenizer.sourceUrl = contents.some() # FIXME: this is not compliant!
+  let valF32 = value.float32
 
-proc consumeContinuationByte*(
-  tokenizer: Tokenizer
-) {.inline.} =
-  inc tokenizer.currLineStartPos
-  inc tokenizer.pos
-
-proc consume4byteIntro*(
-  tokenizer: Tokenizer
-) {.inline.} =
-  dec tokenizer.currLineStartPos
-  inc tokenizer.pos
-
-proc consumeEscape*(
-  tokenizer: Tokenizer
-): char =
-  # TODO: implement this thing
-  ' '
-
-proc consumeEscapeAndWrite*(
-  tokenizer: Tokenizer,
-  str: var string
-) {.inline.} =
-  str &= tokenizer.consumeEscape()
+  if tokenizer.isIdentStart():
+    let unit = tokenizer.consumeName()
+    return Token(
+      kind: tkDimension,
+      dHasSign: hasSign,
+      dValue: valF32,
+      dIntVal: intValue,
+      unit: unit
+    )
+  else:
+    return Token(
+      kind: tkNumber,
+      nHasSign: hasSign,
+      nValue: valF32,
+      nIntVal: intValue
+    )
 
 proc consumeQuotedString*(
   tokenizer: Tokenizer,
@@ -369,50 +477,6 @@ proc consumeComment*(
   tokenizer.checkForSourceMap(contents)
   contents
 
-proc consumeName*(
-  tokenizer: Tokenizer
-): string =
-  let start = tokenizer.pos
-  var valueChars: string
-
-  while true:
-    if tokenizer.isEof():
-      return tokenizer.sliceFrom(start)
-
-    case tokenizer.nextChar()
-    of {'a'..'z'}, {'A'..'Z'}, {'0'..'9'}, '_', '-':
-      tokenizer.forwards(1)
-    of '\\', '\0':
-      valueChars = tokenizer.sliceFrom(start)
-    of {'\x80'..'\xBF'}:
-      tokenizer.consumeContinuationByte()
-    of {'\xF0'..'\xFF'}:
-      tokenizer.consume4byteIntro()
-    else:
-      return tokenizer.sliceFrom(start)
-
-proc isIdentStart*(tokenizer: Tokenizer): bool {.inline.} =
-  if tokenizer.isEof():
-    return false
-
-  case tokenizer.nextChar()
-  of {'a'..'z'}, {'A'..'Z'}, '_', '\0': return true
-  of '-':
-    if not tokenizer.hasAtLeast(1):
-      return false
-
-    case tokenizer.charAt(1)
-    of {'a'..'z'}, {'A'..'Z'}, '-', '_', '\0':
-      return true
-    of '\\':
-      return not tokenizer.hasNewlineAt(1)
-    else:
-      return not tokenizer.charAt(1).isAlphaAscii()
-  of '\\':
-    return not tokenizer.hasNewlineAt(1)
-  else:
-    return not tokenizer.charAt(1).isAlphaAscii()
-
 proc seeFunction*(tokenizer: Tokenizer, value: var string) =
   if tokenizer.varOrEnvFunctions == ssLooking:
     if value.toLowerAscii() in ["var", "env"]:
@@ -426,6 +490,23 @@ proc consumeIdentLike*(tokenizer: Tokenizer): Token =
     return Token(kind: tkFunction, fnName: value)
   else:
     return Token(kind: tkIdent, ident: value)
+
+proc consumeUnquotedUrl*(tokenizer: Tokenizer): Token =
+  let 
+    start = tokenizer.pos
+    fromStart = tokenizer.input[tokenizer.pos-1]
+
+  var
+    newlines = 0
+    lastNewline = 0
+    foundPrintableChar = false
+
+    iidx = -1
+    iter = fromStart
+
+  while true:
+    inc iidx
+    # TODO(xTrayambak): implement this function once you're done with the exams!
 
 proc nextToken*(tokenizer: Tokenizer): Token =
   if tokenizer.isEof():
@@ -476,19 +557,35 @@ proc nextToken*(tokenizer: Tokenizer): Token =
       else:
         tokenizer.forwards(1)
         token = Token(kind: tkDelim, delim: '+')
+    of '-':
+      if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0'..'9'} or
+        tokenizer.hasAtleast(2) and tokenizer.charAt(1) == '.' and tokenizer.charAt(2) in {'0'..'9'}:
+          token = tokenizer.consumeNumeric()
+      elif tokenizer.startsWith("-->"):
+        tokenizer.forwards(3)
+        token = Token(kind: tkCDC)
+      elif tokenizer.isIdentStart():
+        token = tokenizer.consumeIdentLike()
+      else:
+        tokenizer.forwards(1)
+        token = Token(kind: tkDelim, delim: '-')
     of ',':
       tokenizer.forwards(1)
       token = Token(kind: tkComma)
     of '.':
-      # TODO: implement numeric logic!
-      tokenizer.forwards(1)
-      token = Token(kind: tkDelim, delim: '.')
+      if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0'..'9'}:
+        token = tokenizer.consumeNumeric()
+      else:
+        tokenizer.forwards(1)
+        token = Token(kind: tkDelim, delim: '.')
     of '/':
       if tokenizer.startsWith("/*"):
         token = Token(kind: tkComment, comment: tokenizer.consumeComment())
       else:
         tokenizer.forwards(1)
         token = Token(kind: tkDelim, delim: '/')
+    of {'0'..'9'}:
+      token = tokenizer.consumeNumeric()
     of ':':
       tokenizer.forwards(1)
       token = Token(kind: tkColon)
