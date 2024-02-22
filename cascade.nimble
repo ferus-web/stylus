@@ -11,7 +11,7 @@ srcDir        = "src"
 
 requires "nim >= 2.0.0"
 requires "results >= 0.4.0"
-requires "nph >= 0.3.0"
+taskRequires "fmt", "nph >= 0.3.0"
 
-before build:
+task fmt, "Format the codebase":
   exec "nph src/"

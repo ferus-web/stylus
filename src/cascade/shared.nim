@@ -3,8 +3,7 @@
 import std/options
 
 type
-  SourcePosition* = distinct uint
-    ## A position from the start of the input, counted in characters
+  SourcePosition* = uint ## A position from the start of the input, counted in characters
 
   SourceLocation* = object ## The line number
     line*: uint32
