@@ -1,4 +1,4 @@
-import std/[options, strutils, math], shared, results
+import std/[options, strutils, math, sequtils, sets], shared, results
 
 proc unpack[T](opt: Option[T], x: var T): bool {.inline.} =
   if opt.isSome:
@@ -121,10 +121,35 @@ proc sliceFrom*(tokenizer: Tokenizer, start: uint): string {.inline, noSideEffec
   tokenizer.input[start..tokenizer.pos - 1]
 
 proc hasNewlineAt*(
-    tokenizer: Tokenizer, offset: uint
+  tokenizer: Tokenizer, offset: uint
 ): bool {.inline, gcsafe, noSideEffect.} =
   tokenizer.pos + offset < tokenizer.input.len.uint and
     tokenizer.charAt(offset) in ['\n', '\r', '\x0C']
+
+proc currentSourceLine*(
+  tokenizer: Tokenizer
+): string =
+  let 
+    curr = tokenizer.pos
+    rstart = tokenizer.slice(0'u64, uint64 curr)
+      .rfind({'\r', '\n', '\x0C'})
+    
+    start = case rstart
+    of -1: 
+      0
+    else:
+      rstart + 1
+
+    rending = tokenizer.slice(uint64 curr, uint64 (tokenizer.input.len-1))
+      .find({'\r', '\n', '\x0C'})
+    
+    ending = case rending
+    of -1:
+      tokenizer.input.len-1
+    else:
+      rending + 1
+
+  tokenizer.slice(uint64 start, uint64 ending)
 
 proc consumeWhitespace*(tokenizer: Tokenizer, newline: bool): Token {.discardable.} =
   let startPos = tokenizer.pos
@@ -649,6 +674,48 @@ proc consumeIdentLike*(tokenizer: Tokenizer): Token =
       return Token(kind: tkFunction, fnName: value)
   else:
     return Token(kind: tkIdent, ident: value)
+
+proc skipWhitespace*(tokenizer: Tokenizer) =
+  while not tokenizer.isEof():
+    case tokenizer.nextChar()
+    of ' ', '\t':
+      tokenizer.forwards(1)
+    of '\n', '\x0C', '\r':
+      tokenizer.consumeNewline()
+    of '/':
+      if tokenizer.startsWith("/*"):
+        discard tokenizer.consumeComment()
+      else:
+        return
+    else:
+      return
+
+proc skipCdcAndCdo*(
+  tokenizer: Tokenizer
+) =
+  while not tokenizer.isEof():
+    case tokenizer.nextChar()
+    of ' ', '\t':
+      tokenizer.forwards(1)
+    of '\n', '\x0C', '\r':
+      tokenizer.consumeNewline()
+    of '/':
+      if tokenizer.startsWith("/*"):
+        discard tokenizer.consumeComment()
+      else:
+        return
+    of '<':
+      if tokenizer.startsWith("<!--"):
+        tokenizer.forwards(4)
+      else:
+        return
+    of '-':
+      if tokenizer.startsWith("-->"):
+        tokenizer.forwards(3)
+      else:
+        return
+    else:
+      return
 
 proc nextToken*(tokenizer: Tokenizer): Token =
   if tokenizer.isEof():

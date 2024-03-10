@@ -1,4 +1,4 @@
-import cascade, pretty
+import stylus, pretty
 
 const src = """
 /* Hello CSS! 
