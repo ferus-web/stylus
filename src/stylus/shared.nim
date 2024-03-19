@@ -99,5 +99,40 @@ type
     else:
       discard
 
+  BlockType* = enum
+    btParenthesis
+    btSquareBracket
+    btCurlyBracket
+
+  ParserState* = ref object
+    position*: uint
+    currentLineStartPos*: uint
+    currentLineNumber*: uint
+    atStartOf*: Option[BlockType]
+
+proc `$`*(token: Token): string =
+  # TODO: complete this!
+  case token.kind
+  of tkIdent:
+    token.ident
+  of tkAtKeyword:
+    '@' & token.at
+  of tkHash:
+    token.hash
+  of tkIDHash:
+    token.idHash
+  of tkQuotedString:
+    '"' & token.qStr & '"'
+  of tkUnquotedUrl:
+    token.uqUrl
+  of tkDelim:
+    $token.delim
+  of tkNumber:
+    if token.nIntVal.isSome:
+      return $token.nIntVal
+    else:
+      return $token.nValue
+  else: ""
+
 proc isParseError*(token: Token): bool {.inline, noSideEffect, gcsafe.} =
   token.kind notin PARSE_ERRORS

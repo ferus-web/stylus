@@ -1,19 +1,8 @@
-import std/options, results
+import std/[sugar, options], results
 
-import ./[shared, tokenizer]
+import ./[shared, tokenizer, utils]
 
 type
-  BlockType* = enum
-    btParenthesis
-    btSquareBracket
-    btCurlyBracket
-
-  ParserState* = ref object
-    position*: uint
-    currentLineStartPos*: uint
-    currentLineNumber*: uint
-    atStartOf*: Option[BlockType]
-
   ParseUntilErrorBehaviour* = enum
     peConsume
     peStop
@@ -45,7 +34,7 @@ type
     tokenizer*: Tokenizer
     cachedToken*: Option[CachedToken]
 
-  Delimiters* = ref object
+  Delimiters* = object
     bits*: byte
 
   Parser* = ref object
@@ -53,7 +42,7 @@ type
     atStartOf*: Option[BlockType]
     stopBefore*: Delimiters
 
-let
+const
   DelimNone* = Delimiters(
     bits: 0'u8
   )
@@ -69,6 +58,50 @@ let
   DelimComma* = Delimiters(
     bits: 1 shl 4
   )
+  CloseCurlyBracket* = Delimiters(
+    bits: 1 shl 5
+  )
+  CloseSquareBracket* = Delimiters(
+    bits: 1 shl 6
+  )
+  CloseParenthesis* = Delimiters(
+    bits: 1 shl 7
+  )
+
+  uSemi = uint ';'
+  uBang = uint '!'
+  uComma = uint ','
+  uCBB = uint '{'
+  uCCB = uint '}'
+  uCSB = uint ']'
+  uCP = uint ')'
+
+# welp, we can't make it an array, I guess
+const TABLE*: seq[Delimiters] = collect(newSeqOfCap(256)):
+  for x in 0..256:
+    let ux = uint x
+    if ux notin [uSemi, uBang, uComma, uCBB, uCCB, uCSB, uCP]: DelimNone
+    else:
+      var res: Delimiters
+      case ux
+      of uSemi: res = DelimSemicolon
+      of uBang: res = DelimBang
+      of uComma: res = DelimComma
+      of uCBB: res = DelimCurlyBracketBlock
+      of uCCB: res = CloseCurlyBracket
+      of uCSB: res = CloseSquareBracket
+      of uCP: res = CloseParenthesis
+      else: res = DelimNone # this can never happen
+
+      res
+
+proc newParserInput*(
+  input: string
+): ParserInput {.inline.} =
+  ParserInput(
+    tokenizer: newTokenizer(input),
+    cachedToken: none(CachedToken)
+  )
 
 proc newParser*(
   input: ParserInput
@@ -79,8 +112,35 @@ proc newParser*(
     stopBefore: DelimNone
   )
 
+proc contains*(self, other: Delimiters): bool {.inline.} =
+  (self.bits and other.bits) != 0
+
+proc fromChar*(c: Option[char]): Delimiters {.inline.} =
+  if c.isNone:
+    return DelimNone
+
+  TABLE[uint8 c.unsafeGet()]
+
 proc currLine*(parser: Parser): string {.inline.} =
   parser.input.tokenizer.currentSourceLine()
+
+proc currSourceLocation*(
+  parser: Parser
+): SourceLocation {.inline.} =
+  parser.input.tokenizer.currSourceLocation()
+
+proc newBasicError*(
+  parser: Parser,
+  kind: BasicParseErrorKind
+): BasicParseError {.inline.} =
+  BasicParseError(
+    kind: kind,
+    location: parser.currSourceLocation()
+  )
+
+proc reset*(parser: Parser, state: ParserState) {.inline.} =
+  parser.input.tokenizer.reset(state)
+  parser.atStartOf = state.atStartOf
 
 proc opening*(token: Token): Option[BlockType] {.inline, noSideEffect.} =
   result = case token.kind
@@ -144,8 +204,8 @@ proc parseError*(
 
   err
 
-proc basicUnexpectedTokenError*(token: Token): BasicParseError {.inline.} =
-  BasicParseError(kind: bpUnexpectedToken, token: token)
+proc basicUnexpectedTokenError*(location: SourceLocation, token: Token): BasicParseError {.inline.} =
+  BasicParseError(kind: bpUnexpectedToken, token: token, location: location)
 
 proc position*(state: ParserState): SourcePosition {.inline.} =
   SourcePosition(state.position)
@@ -187,6 +247,75 @@ proc skipCdcAndCdo*(parser: Parser) {.inline.} =
     consumeUntilEndOfBlock(parser.atStartOf.unsafeGet(), parser.input.tokenizer)
 
   parser.input.tokenizer.skipCdcAndCdo()
+
+proc state*(parser: Parser): ParserState {.inline.} =
+  ParserState(
+    atStartOf: parser.atStartOf,
+    position: parser.input.tokenizer.pos,
+    currentLineStartPos: parser.input.tokenizer.currLineStartPos,
+    currentLineNumber: parser.input.tokenizer.currLineNumber
+  )
+
+proc nextIncludingWhitespaceAndComments*(
+  parser: Parser
+): Result[Token, BasicParseError] =
+  var blockType: BlockType
+  if &parser.atStartOf:
+    blockType = parser.atStartOf.get()
+    consumeUntilEndOfBlock(blockType, parser.input.tokenizer)
+
+  let c = parser.input.tokenizer.nextChar()
+  if parser.stopBefore.contains(fromChar(some c)):
+    return err(
+      parser.newBasicError(
+        bpEndOfInput
+      )
+    )
+
+  let
+    tokenStartPos = parser.input.tokenizer.position()
+    usingCachedToken = if parser.input.cachedToken.isSome:
+      parser.input.cachedToken.unsafeGet().startPos == tokenStartPos
+    else:
+      false
+
+  var token: Token
+
+  if usingCachedToken:
+    let cachedToken = parser.input.cachedToken.unsafeGet() # we already verified that it isn't an empty option, so it's fine (hopefully)
+    parser.input.tokenizer.reset(cachedToken.endState)
+    case cachedToken.token.kind
+    of tkFunction:
+      parser.input.tokenizer.seeFunction(cachedToken.token.fnName)
+    else: discard
+
+    token = cachedToken.token
+  else:
+    let newToken = parser
+      .input
+      .tokenizer
+      .nextToken()
+
+    parser.input.cachedToken = some(
+      CachedToken(
+        token: newToken,
+        startPos: tokenStartPos,
+        endState: parser.input.tokenizer.state()
+      )
+    )
+
+    token = newToken
+
+  let cBlockType = closing token
+
+  if cBlockType.isSome:
+    parser.atStartOf = cBlockType
+
+  ok(token)
+
+proc next*(parser: Parser): Result[Token, BasicParseError] =
+  parser.skipWhitespace()
+  parser.nextIncludingWhitespaceAndComments()
 
 proc expectExhausted*(
   parser: Parser

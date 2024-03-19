@@ -1,4 +1,5 @@
-import std/[options, strutils, math, sequtils, sets], shared, results
+import std/[options, strutils, math, sequtils, unicode, sets]
+import shared, results
 
 proc unpack[T](opt: Option[T], x: var T): bool {.inline.} =
   if opt.isSome:
@@ -12,18 +13,21 @@ proc get*(s: string, idx: int): Option[char] {.inline.} =
     return some(s[idx])
 
 type
-  TokenizerDefect* = object of Defect
+  TokenizerDefect* = object of Defect ## An unrecoverable error that the tokenizer might raise
   Tokenizer* = ref object
-    input: string
-    pos: uint
-    currLineStartPos: uint
-    currLineNumber: uint32
-    varOrEnvFunctions: SeenStatus
-    sourceMapUrl, sourceUrl: Option[string]
+    ## The tokenizer struct itself
+    input*: string                              ## The input string
+    pos*: uint                                  ## The current position of the character we're at
+    currLineStartPos*: uint                     ## Where the current line starts at
+    currLineNumber*: uint32                     ## The current line number
+    varOrEnvFunctions: SeenStatus               ## Whether we've seen any var or env functions
+    sourceMapUrl, sourceUrl: Option[string]     ## Source + Source Map URLs
 
-  QuotedString* = Result[string, string]
+  QuotedString* = Result[string, string] ## A quoted string, first value is a successfully parsed string, 
+                                         ## and second one is an error if there's a bad string
 
-proc tokenizer*(input: string): Tokenizer {.inline.} =
+proc newTokenizer*(input: string): Tokenizer {.inline.} =
+  ## Create a new tokenizer with `input`, a CSS3 string
   Tokenizer(
     input: input,
     pos: 0'u,
@@ -32,15 +36,29 @@ proc tokenizer*(input: string): Tokenizer {.inline.} =
     varOrEnvFunctions: ssDontCare,
   )
 
+proc currSourceLocation*(tokenizer: Tokenizer): SourceLocation {.inline.} =
+  SourceLocation(
+    line: tokenizer.currLineNumber,
+    column: (tokenizer.pos - tokenizer.currLineStartPos + 1).uint32
+  )
+
+proc reset*(tokenizer: Tokenizer, state: ParserState) {.inline.} =
+  tokenizer.pos = state.position
+  tokenizer.currLineStartPos = state.currentLineStartPos
+  tokenizer.currLineNumber = state.currentLineNumber.uint32 # FIXME: hacky conversions
+
 proc lookForVarOrEnvFunctions*(tokenizer: Tokenizer) {.inline.} =
+  ## Set the var or env functions state to "looking"
   tokenizer.varOrEnvFunctions = ssLooking
 
 proc seenVarOrEnvFunctions*(tokenizer: Tokenizer): bool {.inline.} =
+  ## Have we seen any var or env functions?
   let seen = tokenizer.varOrEnvFunctions == ssSeenAtleastOne
   tokenizer.varOrEnvFunctions = ssDontCare
   seen
 
 proc seeFunction*(tokenizer: Tokenizer, name: string) {.inline.} =
+  ## See a var or env function
   if tokenizer.varOrEnvFunctions == ssLooking:
     let lower = toLowerAscii(name)
 
@@ -48,32 +66,63 @@ proc seeFunction*(tokenizer: Tokenizer, name: string) {.inline.} =
       tokenizer.varOrEnvFunctions = ssSeenAtleastOne
 
 proc hasAtLeast*(tokenizer: Tokenizer, n: uint): bool {.inline, gcsafe, noSideEffect.} =
+  ## Are there `n` number of characters ahead of us?
   tokenizer.pos + n < tokenizer.input.len.uint
 
 proc isEof*(tokenizer: Tokenizer): bool {.inline, gcsafe, noSideEffect.} =
+  ## Have we hit the end of the input?
   not tokenizer.hasAtLeast(0)
 
 proc startsWith*(tokenizer: Tokenizer, needle: string): bool {.inline.} =
+  ## Does the following data start with `needle`?
   tokenizer.input[tokenizer.pos..tokenizer.input.len - 1].startsWith(needle)
 
 proc slice*(tokenizer: Tokenizer, start, stop: uint): string {.inline.} =
+  ## Get a slice of the input from `start` to `stop`
   tokenizer.input[start..stop]
 
 proc charAt*(tokenizer: Tokenizer, offset: uint = 0'u): char {.inline, noSideEffect.} =
+  ## Get the character at our current position + `offset`.
   tokenizer.input[tokenizer.pos + offset]
 
+proc position*(tokenizer: Tokenizer): SourcePosition {.inline, noSideEffect.} =
+  SourcePosition(tokenizer.pos)
+
+proc state*(tokenizer: Tokenizer): ParserState {.inline, noSideEffect.} =
+  ParserState(
+    position: tokenizer.position,
+    currentLineStartPos: tokenizer.currLineStartPos,
+    currentLineNumber: tokenizer.currLineNumber,
+    atStartOf: none(BlockType)
+  )
+
 proc nextChar*(tokenizer: Tokenizer): char {.inline, noSideEffect.} =
+  ## Get the next character
   charAt(tokenizer, 0)
 
 proc forwards*(tokenizer: Tokenizer, n: uint) {.inline, gcsafe.} =
+  ## Go forwards by `n` characters
   tokenizer.pos += n
 
 proc charToDecimalDigit*(c: char): Option[uint32] {.inline.} =
+  ## Convert characters to decimal digits
   if c >= '0' and c <= '9':
     return some((c.ord - '0'.ord).uint32)
 
-#[proc consumeHexDigits*(tokenizer: Tokenizer): array[2, uint32] {.inline.} =
-  var value, digits: int
+proc charToHexDigit*(c: char): Option[uint32] {.inline.} =
+  let b = cast[uint8](c)
+  case c
+  of {'0'..'9'}:
+    (b - uint8 '0').uint32.some
+  of {'a'..'f'}:
+    (b - (uint8 'a') + 10'u8).uint32.some
+  of {'A'..'F'}:
+    (b - (uint8 'A') + 10'u8).uint32.some
+  else:
+    none(uint32)
+
+proc consumeHexDigits*(tokenizer: Tokenizer): tuple[val, digits: uint32] {.inline.} =
+  var value, digits: uint32
 
   while digits < 6 and not tokenizer.isEof():
     let cx = charToHexDigit(tokenizer.nextChar())
@@ -81,16 +130,17 @@ proc charToDecimalDigit*(c: char): Option[uint32] {.inline.} =
     if cx.isSome:
       let digit = get cx
 
-      value = value * 16 + digit
+      value = value * 16'u32 + digit
       inc digits
 
       tokenizer.forwards(1)
     else:
       break
 
-  (value, digits)]#
+  (value, digits)
 
 proc consumeKnownChar*(tokenizer: Tokenizer, c: char) {.inline.} =
+  ## Consume a known character `c` if it exists
   let b = cast[uint8](c)
 
   inc tokenizer.pos
@@ -101,6 +151,7 @@ proc consumeKnownChar*(tokenizer: Tokenizer, c: char) {.inline.} =
     tokenizer.currLineStartPos = tokenizer.currLineStartPos + 1
 
 proc consumeNewline*(tokenizer: Tokenizer) {.inline.} =
+  ## Consume a new line in front of us
   let c = tokenizer.nextChar()
   assert c == '\r' or c == '\n' or c == '\x0C'
 
@@ -112,6 +163,7 @@ proc consumeNewline*(tokenizer: Tokenizer) {.inline.} =
   inc tokenizer.currLineNumber
 
 proc sliceFrom*(tokenizer: Tokenizer, start: uint): string {.inline, noSideEffect.} =
+  ## Slice from `start` to our current position
   if start == tokenizer.pos:
     var thing = newString(1)
     thing[0] = tokenizer.input[start]
@@ -120,9 +172,20 @@ proc sliceFrom*(tokenizer: Tokenizer, start: uint): string {.inline, noSideEffec
 
   tokenizer.input[start..tokenizer.pos - 1]
 
+proc consumeChar*(tokenizer: Tokenizer): char {.inline.} =
+  let 
+    c = tokenizer.nextChar()
+    lenUtf8 = Rune(c).size().uint
+
+  tokenizer.pos += lenUtf8
+  tokenizer.currLineStartPos = tokenizer.currLineStartPos + (lenUtf8) # FIXME: not standards compliant! subtract the UTF-16 length from the UTF-8 length!
+
+  c
+
 proc hasNewlineAt*(
   tokenizer: Tokenizer, offset: uint
 ): bool {.inline, gcsafe, noSideEffect.} =
+  ## Is there a newline at `offset`?
   tokenizer.pos + offset < tokenizer.input.len.uint and
     tokenizer.charAt(offset) in ['\n', '\r', '\x0C']
 
@@ -152,6 +215,7 @@ proc currentSourceLine*(
   tokenizer.slice(uint64 start, uint64 ending)
 
 proc consumeWhitespace*(tokenizer: Tokenizer, newline: bool): Token {.discardable.} =
+  ## Consume any whitespace in the input
   let startPos = tokenizer.pos
   if newline:
     tokenizer.consumeNewline()
@@ -171,6 +235,7 @@ proc consumeWhitespace*(tokenizer: Tokenizer, newline: bool): Token {.discardabl
   Token(kind: tkWhitespace, wsStr: tokenizer.sliceFrom(startPos))
 
 proc isIdentStart*(tokenizer: Tokenizer): bool {.inline.} =
+  ## Are we at the start of an ident token?
   if tokenizer.isEof():
     return false
 
@@ -194,6 +259,7 @@ proc isIdentStart*(tokenizer: Tokenizer): bool {.inline.} =
     return not tokenizer.charAt(1).isAlphaAscii()
 
 proc checkForSourceMap*(tokenizer: Tokenizer, contents: string) =
+  ## Self-explanatory name.
   let
     directive = "# sourceMappingURL="
     directiveOld = "@ sourceMappingURL="
@@ -225,8 +291,33 @@ proc consume4byteIntro*(tokenizer: Tokenizer) {.inline.} =
   inc tokenizer.pos
 
 proc consumeEscape*(tokenizer: Tokenizer): char =
-  # TODO: implement this thing
-  ' '
+  if tokenizer.isEof():
+    return '\0' # FIXME: this is not standards compliant!
+
+  case tokenizer.nextChar()
+  of {'0'..'9'}, {'A'..'F'}, {'a'..'f'}:
+    let (c, _) = tokenizer.consumeHexDigits()
+    if not tokenizer.isEof():
+      case tokenizer.nextChar()
+      of ' ', '\t':
+        tokenizer.forwards(1)
+      of '\n', '\x0C', '\r':
+        tokenizer.consumeNewline()
+      else: discard
+
+    let replacementChar = '\0' # FIXME: this is not standards compliant!
+    if c != 0:
+      try:
+        return char c
+      except CatchableError:
+        replacementChar
+    else:
+      replacementChar
+  of '\0':
+    tokenizer.forwards(1)
+    return '\0' # FIXME: this is not standards compliant!
+  else:
+    tokenizer.consumeChar()
 
 proc consumeEscapeAndWrite*(tokenizer: Tokenizer, str: var string) {.inline.} =
   str &= tokenizer.consumeEscape()

@@ -1,4 +1,4 @@
-import stylus, pretty
+import common
 
 const src = """
 /* Hello CSS! 
@@ -17,8 +17,4 @@ body {
 }
 """
 
-let tokenizer = tokenizer(src)
-
-while not tokenizer.isEof():
-  let tok = tokenizer.nextToken()
-  print tok
+dumpTokens(src)
