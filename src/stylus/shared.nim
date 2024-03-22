@@ -1,6 +1,7 @@
 # ILOVECIRCULARIMPORTSILOVECIRCULARIMPORTSILOVECIRCULARIMPORTSILOVECIRCULARIMPORTSILOVECIRCULARIMPORTS
 ## This file has everything that is shared by the parser and tokenizer
 import std/options
+import ./utils
 
 type
   SourcePosition* = uint ## A position from the start of the input, counted in characters
@@ -128,7 +129,7 @@ proc `$`*(token: Token): string =
   of tkDelim:
     $token.delim
   of tkNumber:
-    if token.nIntVal.isSome:
+    if &token.nIntVal:
       return $token.nIntVal
     else:
       return $token.nValue
