@@ -37,6 +37,19 @@ type
   Delimiters* = object
     bits*: byte
 
+  ParseErrorKind* = enum
+    peBasic
+    peCustom
+
+  ParseError*[E] = ref object
+    case kind*: ParseErrorKind
+    of peBasic:
+      basic*: E
+    of peCustom:
+      custom*: E
+
+    location*: SourceLocation
+
   Parser* = ref object
     input*: ParserInput
     atStartOf*: Option[BlockType]
@@ -186,14 +199,14 @@ proc parseError*(
 
   case kind
   of bpUnexpectedToken:
-    if not token.isSome:
+    if not &token:
       raise newException(
           ValueError, "bpUnexpectedToken passed, but `token` argument was left empty!"
         )
 
     err.token = get(token)
   of bpAtRuleInvalid:
-    if not rule.isSome:
+    if not &rule:
       raise newException(
           ValueError, "bpAtRuleInvalid passed, but `rule` argument was left empty!"
         )
@@ -225,7 +238,7 @@ proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
   while ctk != nil:
     let closingBk = closing ctk
 
-    if closingBk.isSome:
+    if &closingBk:
       if stack[-1] == closingBk.unsafeGet():
         discard pop stack
         if stack.len < 1:
@@ -233,17 +246,26 @@ proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
 
     let openingBk = opening ctk
 
-    if openingBk.isSome:
+    if &openingBk:
       stack.add(openingBk.unsafeGet())
 
 proc skipWhitespace*(parser: Parser) {.inline.} =
-  if parser.atStartOf.isSome:
+  if &parser.atStartOf:
     consumeUntilEndOfBlock(parser.atStartOf.unsafeGet(), parser.input.tokenizer)
 
   parser.input.tokenizer.skipWhitespace()
 
+proc newBasicUnexpectedTokenError*(
+  location: SourceLocation, 
+  token: Token
+): BasicParseError {.inline.} =
+  BasicParseError(
+    kind: bpUnexpectedToken,
+    token: token
+  )
+
 proc skipCdcAndCdo*(parser: Parser) {.inline.} =
-  if parser.atStartOf.isSome:
+  if &parser.atStartOf:
     consumeUntilEndOfBlock(parser.atStartOf.unsafeGet(), parser.input.tokenizer)
 
   parser.input.tokenizer.skipCdcAndCdo()
@@ -308,7 +330,7 @@ proc nextIncludingWhitespaceAndComments*(
 
   let cBlockType = closing token
 
-  if cBlockType.isSome:
+  if &cBlockType:
     parser.atStartOf = cBlockType
 
   ok(token)
@@ -316,6 +338,18 @@ proc nextIncludingWhitespaceAndComments*(
 proc next*(parser: Parser): Result[Token, BasicParseError] =
   parser.skipWhitespace()
   parser.nextIncludingWhitespaceAndComments()
+
+template expect*(
+  parser: Parser,
+  body: untyped
+) =
+  # does this actually work like it's supposed to?
+  let
+    start = parser.currSourceLocation()
+    next = parser.next()
+
+  if next.isOk:
+    let value {.inject.} = next.get()
 
 proc expectExhausted*(
   parser: Parser
@@ -340,3 +374,175 @@ proc expectExhausted*(
 
   parser.reset(start)
   res
+
+proc position*(
+  parser: Parser
+): SourcePosition {.inline.} =
+  parser.input.tokenizer.position()
+
+proc newError*(parser: Parser, err: BasicParseError): ParseError {.inline.} =
+  ParseError[BasicParseError] (
+    kind: peBasic,
+    basic: err,
+    location: parser.currSourceLocation()
+  )
+
+proc newErrorForNextToken*(parser: Parser): ParseError {.inline.} =
+  let t = parser.next()
+  
+  let token = if t.isOk:
+    deepCopy(t)
+
+  let err = if t.isErr:
+    t.error()
+
+  parser.newError(
+    BasicParseError(
+      kind: bpUnexpectedToken,
+      token: token
+    )
+  )
+
+proc nextChar*(parser: Parser): Option[char] {.inline.} =
+  let c = some parser.input.tokenizer.nextChar()
+
+  if fromChar(c) in parser.stopBefore:
+    return
+
+  c
+
+proc lookForVarOrEnvFunctions*(parser: Parser) {.inline.} =
+  parser.input.tokenizer.lookForVarOrEnvFunctions()
+
+proc seenVarOrEnvFunctions*(parser: Parser): bool {.inline.} =
+  parser.seenVarOrEnvFunctions()
+
+# generics hell 2: electric boogaloo
+proc tryParse*[T, E](
+  parser: Parser,
+  thing: proc(parser: Parser): Result[T, E]
+): Result[T, E] =
+  let 
+    start = parser.state()
+    res = thing(parser)
+
+  if res.isErr:
+    parser.reset(start)
+
+  res
+
+proc slice*(
+  parser: Parser,
+  range: Slice[SourcePosition]
+): string {.inline.} =
+  parser.input.tokenizer.slice(range)
+
+proc sliceFrom*(
+  parser: Parser,
+  start: SourcePosition
+): string {.inline.} =
+  parser.input.tokenizer.sliceFrom(start)
+
+proc parseEntirely*[T, E](
+  parser: Parser,
+  parse: proc(parser: Parser): Result[T, ParseError[E]]
+) {.inline.} =
+  let res = parse parser
+  parser.expectExhausted()
+  ok res
+
+proc parseUntilBefore*[T, E](
+  parser: Parser,
+  delimiters: Delimiters,
+  errorBehaviour: ParseUntilErrorBehaviour,
+  parse: proc(parser: Parser): Result[T, ParseError[E]]
+) =
+  let delimiters = parser.stopBefore or delimiters
+
+  var delimitedParser = Parser(
+    input: parser.input,
+    atStartOf: parser.atStartOf,
+    stopBefore: delimiters
+  )
+  let res = delimitedParser.parseEntirely(parse)
+  if errorBehaviour == peStop and res.isErr:
+    return res
+
+  let blockType = delimitedParser.atStartOf
+
+  if &blockType:
+    consumeUntilEndOfBlock(blockType, delimitedParser.input.tokenizer)
+
+  while true:
+    if parser.input.tokenizer.nextChar().some().fromChar() in delimiters:
+      break
+
+    let token = parser.input.tokenizer.nextToken()
+
+    if token.isOk:
+      let blckType = opening token.get()
+      if &blckType:
+        consumeUntilEndOfBlock(blckType, parser.input.tokenizer)
+    else:
+      break
+
+  res
+
+proc parseUntilBefore*[T, E](
+  parser: Parser,
+  delimiters: Delimiters,
+  parse: proc(parser: Parser): Result[T, ParseError[E]]
+) {.inline.} =
+  parseUntilBefore(parser, delimiters, peConsume, parse)
+
+proc parseUntilAfter*[T, E](
+  parser: Parser,
+  delimiters: Delimiters,
+  errorBehaviour: ParseUntilErrorBehaviour,
+  parse: proc(parser: Parser): Result[T, ParseError[E]]
+) {.inline.} =
+  let res = parseUntilBefore(parser, delimiters, errorBehaviour, parse)
+  if errorBehaviour == peStop and res.isErr:
+    return res
+
+  let c = parser.input.tokenizer.nextChar()
+  if c.some().fromChar() notin parser.stopBefore:
+    parser.input.tokenizer.forwards(1)
+    if c == '{':
+      consumeUntilEndOfBlock(btCurlyBracket, parser.input.tokenizer)
+
+  res
+
+proc parseUntilAfter*[T, E](
+  parser: Parser,
+  delimiters: Delimiters,
+  parse: proc(parser: Parser): Result[T, ParseError[E]]
+) {.inline.} =
+  parseUntilAfter(parser, delimiters, peConsume, parse)
+
+proc nextIncludingWhitespace*(parser: Parser): Result[Token, BasicParseError] =
+  while true:
+    let res = parser.nextIncludingWhitespaceAndComments()
+
+    if res.isErr:
+      return res.error().err()
+
+    if res.isOk:
+      continue
+
+    break
+
+  ok(parser.input.cachedToken.get().token)
+
+proc expectWhitespace*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  let 
+    start = parser.currSourceLocation()
+    next = parser.nextIncludingWhitespace().get()
+
+  case next.kind
+  of tkWhitespace:
+    return ok(next.wsStr)
+  else:
+    err(
+      start.newBasicUnexpectedTokenError(deepCopy next)
+    )
