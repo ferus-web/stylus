@@ -1,8 +1,8 @@
 import std/[options, strutils, math, sequtils, unicode, sets]
-import shared, results
+import shared, utils, results
 
 proc unpack[T](opt: Option[T], x: var T): bool {.inline.} =
-  if opt.isSome:
+  if &opt:
     x = unsafeGet(opt)
     return true
 
@@ -81,6 +81,12 @@ proc slice*(tokenizer: Tokenizer, start, stop: uint): string {.inline.} =
   ## Get a slice of the input from `start` to `stop`
   tokenizer.input[start..stop]
 
+proc slice*(tokenizer: Tokenizer, range: Slice[SourcePosition]): string {.inline.} =
+  ## Same as above, but uses a slice of `SourcePosition`s instead of two separate `uint` arguments.
+  tokenizer.slice(
+    range.a, range.b
+  )
+
 proc charAt*(tokenizer: Tokenizer, offset: uint = 0'u): char {.inline, noSideEffect.} =
   ## Get the character at our current position + `offset`.
   tokenizer.input[tokenizer.pos + offset]
@@ -127,7 +133,7 @@ proc consumeHexDigits*(tokenizer: Tokenizer): tuple[val, digits: uint32] {.inlin
   while digits < 6 and not tokenizer.isEof():
     let cx = charToHexDigit(tokenizer.nextChar())
 
-    if cx.isSome:
+    if &cx:
       let digit = get cx
 
       value = value * 16'u32 + digit
@@ -756,7 +762,7 @@ proc consumeIdentLike*(tokenizer: Tokenizer): Token =
       tokenizer.forwards(1)
       let url = tokenizer.consumeUnquotedUrl()
 
-      if not url.isSome:
+      if not &url:
         return Token(kind: tkFunction, fnName: "url")
       else:
         return url.get()
