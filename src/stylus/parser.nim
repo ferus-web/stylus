@@ -1,4 +1,4 @@
-import std/[sugar, options], results
+import std/[sugar, options, strutils, sequtils], results
 
 import ./[shared, tokenizer, utils]
 
@@ -36,6 +36,8 @@ type
 
   Delimiters* = object
     bits*: byte
+
+  ParserDefect* = object of Defect ## Unrecoverable errors in the parser's logic which are meant to never fail under normal circumstances
 
   ParseErrorKind* = enum
     peBasic
@@ -89,7 +91,7 @@ const
   uCSB = uint ']'
   uCP = uint ')'
 
-# welp, we can't make it an array, I guess
+# TODO: welp, we can't make it an array, I guess
 const TABLE*: seq[Delimiters] = collect(newSeqOfCap(256)):
   for x in 0..256:
     let ux = uint x
@@ -264,6 +266,12 @@ proc newBasicUnexpectedTokenError*(
     token: token
   )
 
+proc newBasicUnexpectedTokenError*(
+  parser: Parser,
+  token: Token
+): BasicParseError {.inline.} =
+  newBasicUnexpectedTokenError(parser.currSourceLocation(), token)
+
 proc skipCdcAndCdo*(parser: Parser) {.inline.} =
   if &parser.atStartOf:
     consumeUntilEndOfBlock(parser.atStartOf.unsafeGet(), parser.input.tokenizer)
@@ -339,17 +347,25 @@ proc next*(parser: Parser): Result[Token, BasicParseError] =
   parser.skipWhitespace()
   parser.nextIncludingWhitespaceAndComments()
 
-template expect*(
+proc expect*[T](
   parser: Parser,
-  body: untyped
-) =
-  # does this actually work like it's supposed to?
+  wants: openArray[TokenKind],
+  fn: proc(token: Token): Result[T, BasicParseError]
+): Result[T, BasicParseError] {.inline.} =
   let
     start = parser.currSourceLocation()
     next = parser.next()
 
   if next.isOk:
     let value {.inject.} = next.get()
+    if value.kind notin wants:
+      return err(
+        start.newBasicUnexpectedTokenError(deepCopy value)
+      )
+    else:
+      return fn(value)
+  else:
+    return err(next.error())
 
 proc expectExhausted*(
   parser: Parser
@@ -446,10 +462,10 @@ proc sliceFrom*(
 proc parseEntirely*[T, E](
   parser: Parser,
   parse: proc(parser: Parser): Result[T, ParseError[E]]
-) {.inline.} =
+): Result[T, ParseError[E]]  {.inline.} =
   let res = parse parser
-  parser.expectExhausted()
-  ok res
+  discard parser.expectExhausted()
+  res
 
 proc parseUntilBefore*[T, E](
   parser: Parser,
@@ -546,3 +562,219 @@ proc expectWhitespace*(parser: Parser): Result[string, BasicParseError] {.inline
     err(
       start.newBasicUnexpectedTokenError(deepCopy next)
     )
+
+proc parseNestedBlock*[T, E](
+  parser: Parser, 
+  parse: proc(parser: Parser): Result[T, E]
+): Result[T, E] =
+  if parser.atStartOf.isNone:
+    raise newException(
+      ParserDefect,
+      "A nested parser can only be created when a tkFunction, tkParenBlock, tkSquareBracketBlock or tkCurlyBracketBlock " &
+      "token was just consumed."
+    )
+
+  let 
+    blockType = parser.atStartOf.unsafeGet()
+    closingDelim = case blockType:
+      of btCurlyBracket:
+        CloseCurlyBracket
+      of btSquareBracket:
+        CloseSquareBracket
+      of btParenthesis:
+        CloseParenthesis
+
+  var nestedParser = Parser(
+    input: parser.input,
+    atStartOf: none(BlockType),
+    stopBefore: closingDelim
+  )
+
+  let res = nestedParser.parseEntirely(parse)
+
+  let blkType = nestedParser.atStartOf
+
+  if blkType.isSome:
+    consumeUntilEndOfBlock(blkType.unsafeGet(), nestedParser.input.tokenizer)
+
+  consumeUntilEndOfBlock(blockType, nestedParser.input.tokenizer)
+  res
+
+proc expectIdent*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  # FIXME: this is incredibly dumb!
+  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+    ok(token.ident)
+
+  expect parser, [tkIdent], (token: Token) => inner token
+
+proc expectIdentMatching*(
+  parser: Parser,
+  expectedValue: string
+): Result[string, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+    if token.ident.toLowerAscii() == expectedValue:
+      ok token.ident
+    else:
+      err parser.newBasicUnexpectedTokenError(token)
+
+  expect parser, [tkIdent], (token: Token) => inner token
+
+proc expectString*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+    ok(token.qStr)
+
+  expect parser, [tkQuotedString], (token: Token) => inner token
+
+proc expectIdentOrString*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+    case token.kind
+    of tkIdent:
+      return ok token.ident
+    of tkQuotedString:
+      return ok token.qStr
+    else: discard
+
+  expect parser, [tkIdent, tkQuotedString], (token: Token) => inner token
+
+proc expectUrl*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.inline.} =
+    case token.kind
+    of tkUnquotedUrl:
+      return ok token.uqUrl
+    of tkFunction:
+      if token.fnName.toLowerAscii() == "url":
+        proc parseFn(input: Parser): Result[string, ParseError[BasicParseError]] =
+          let str = input.expectString()
+          if str.isOk:
+            return ok(str.get())
+          else:
+            return err(
+              ParseError[BasicParseError](
+                kind: peBasic,
+                basic: str.error()
+              )
+            )
+        
+        # TODO: wtf is this and why does it work?
+        let res = parser.parseNestedBlock(parseFn)
+        if not res.isOk:
+          return res.error().basic.err()
+        else:
+          return res.get().ok()
+    else: discard
+
+  expect parser, [tkUnquotedUrl, tkFunction], (token: Token) => inner token
+
+proc expectUrlOrString*(parser: Parser): Result[string, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.inline.} =
+    case token.kind
+    of tkUnquotedUrl:
+      return ok token.uqUrl
+    of tkQuotedString:
+      return ok token.qStr
+    of tkFunction:
+      # TODO: same clusterfuck as above, move it into another function
+      if token.fnName.toLowerAscii() == "url":
+        proc parseFn(input: Parser): Result[string, ParseError[BasicParseError]] =
+          let str = input.expectString()
+          if str.isOk:
+            return ok(str.get())
+          else:
+            return err(
+              ParseError[BasicParseError](
+                kind: peBasic,
+                basic: str.error()
+              )
+            )
+        
+        # TODO: wtf is this and why does it work?
+        let res = parser.parseNestedBlock(parseFn)
+        if not res.isOk:
+          return res.error().basic.err()
+        else:
+          return res.get().ok()
+    else: discard
+
+  expect parser, [tkUnquotedUrl, tkQuotedString, tkFunction], (token: Token) => inner token
+
+proc expectNumber*(parser: Parser): Result[float32, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[float32, BasicParseError] {.inline.} =
+    case token.kind
+    of tkNumber:
+      return ok token.nValue
+    else: discard
+
+  expect parser, [tkNumber], (token: Token) => inner token
+
+proc expectInt*(parser: Parser): Result[int32, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[int32, BasicParseError] {.inline.} =
+    case token.kind
+    of tkNumber:
+      return ok token.nIntVal.get()
+    else: discard
+
+  expect parser, [tkNumber], (token: Token) => inner token
+
+proc expectPercentage*(parser: Parser): Result[float32, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[float32, BasicParseError] {.inline.} =
+    case token.kind
+    of tkPercentage:
+      return ok token.pUnitValue
+    else: discard
+
+  expect parser, [tkPercentage], (token: Token) => inner token
+
+proc expectColon*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkColon], (token: Token) => inner token
+
+proc expectSemicolon*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkSemicolon], (token: Token) => inner token
+
+proc expectComma*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkComma], (token: Token) => inner token
+
+proc expectDelim*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkDelim], (token: Token) => inner token
+
+proc expectCurlyBracketBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkCurlyBracketBlock], (token: Token) => inner token
+
+proc expectSquareBracketBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkSquareBracketBlock], (token: Token) => inner token
+
+proc expectParenBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkParenBlock], (token: Token) => inner token
+
+proc expectFunction*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return
+
+  expect parser, [tkFunction], (token: Token) => inner token
+
+proc expectFunctionMatching*(parser: Parser, name: string): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    if token.fnName.toLowerAscii() == name:
+      return ok()
+
+  expect parser, [tkFunction], (token: Token) => inner token
