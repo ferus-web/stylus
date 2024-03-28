@@ -279,7 +279,7 @@ proc nextIncludingWhitespaceAndComments*(
   let
     tokenStartPos = parser.input.tokenizer.position()
     usingCachedToken =
-      if parser.input.cachedToken.isSome:
+      if &parser.input.cachedToken:
         parser.input.cachedToken.unsafeGet().startPos == tokenStartPos
       else:
         false
@@ -531,7 +531,7 @@ proc parseNestedBlock*[T, E](
 
   let blkType = nestedParser.atStartOf
 
-  if blkType.isSome:
+  if &blkType:
     consumeUntilEndOfBlock(blkType.unsafeGet(), nestedParser.input.tokenizer)
 
   consumeUntilEndOfBlock(blockType, nestedParser.input.tokenizer)
