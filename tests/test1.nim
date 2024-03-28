@@ -2,7 +2,7 @@ import common
 
 const src = """
 /* Hello CSS! 
-   This is some basic CSS code to test Cascade's tokenizer!
+   This is some basic CSS code to test Stylus' tokenizer!
    Currently, it can support comments, functions, numericals, and more!
 */
 body {
