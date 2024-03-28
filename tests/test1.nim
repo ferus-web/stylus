@@ -1,3 +1,4 @@
+import unittest
 import common
 
 const src = """
@@ -17,4 +18,5 @@ body {
 }
 """
 
-dumpTokens(src)
+test "test tokenization":
+  dumpTokens(src)

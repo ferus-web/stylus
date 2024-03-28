@@ -1,12 +1,22 @@
+## Stylus' tokenizer code.
+## A `Tokenizer` helper class is implemented here that manages the state of tokenization.
+##
+## .. code-block:: Nim
+##  import stylus
+##
+##  let tokenizer = newTokenizer("""
+##  body {
+##    background-color: rgb(40, 50, 30);
+##  }
+##  """)
+##
+##  assert tokenizer.next().kind == tkIdent
+##  assert tokenizer.next().kind == tkWhitespace
+## 
+## It is not meant to be used in of itself, use the parser instead unless you want to parse the CSS yourself.
+
 import std/[options, strutils, math, sequtils, unicode, sets]
 import shared, utils, results
-
-proc unpack[T](opt: Option[T], x: var T): bool {.inline.} =
-  if &opt:
-    x = unsafeGet(opt)
-    return true
-
-  false
 
 proc get*(s: string, idx: int): Option[char] {.inline.} =
   if idx < s.len:

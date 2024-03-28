@@ -1,7 +1,7 @@
-import stylus, pretty
+import stylus
 
 proc dumpTokens*(src: string) {.inline.} =
   let tokenizer = newTokenizer(src)
 
   while not tokenizer.isEof():
-    print tokenizer.nextToken()
+    echo repr tokenizer.nextToken()

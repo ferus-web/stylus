@@ -1,0 +1,16 @@
+h1 {
+	color: rgba(255, 255, 255, 255);
+	non-existent-attribute: "very cool indeed";
+	hello: world("haha");
+}
+
+thing
+{ /* yep, this works! */
+	y-offset: 32px; /* units! */
+	stupidity: 100%; /* percentages! */
+	floatingpoint: 100.5; /* floats! */
+}
+
+super-cool-thing {
+	background-image: url(https://github.com/favicon.img);
+}
