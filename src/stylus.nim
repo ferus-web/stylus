@@ -1,3 +1,3 @@
-import stylus/[parser, shared, tokenizer]
+import stylus/[shared, tokenizer]
 
-export parser, shared, tokenizer
+export shared, tokenizer

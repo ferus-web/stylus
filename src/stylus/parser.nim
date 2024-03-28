@@ -37,7 +37,8 @@ type
   Delimiters* = object
     bits*: byte
 
-  ParserDefect* = object of Defect ## Unrecoverable errors in the parser's logic which are meant to never fail under normal circumstances
+  ParserDefect* = object of Defect
+    ## Unrecoverable errors in the parser's logic which are meant to never fail under normal circumstances
 
   ParseErrorKind* = enum
     peBasic
@@ -58,30 +59,14 @@ type
     stopBefore*: Delimiters
 
 const
-  DelimNone* = Delimiters(
-    bits: 0'u8
-  )
-  DelimCurlyBracketBlock* = Delimiters(
-    bits: 1 shl 1
-  )
-  DelimSemicolon* = Delimiters(
-    bits: 1 shl 2
-  )
-  DelimBang* = Delimiters(
-    bits: 1 shl 3
-  )
-  DelimComma* = Delimiters(
-    bits: 1 shl 4
-  )
-  CloseCurlyBracket* = Delimiters(
-    bits: 1 shl 5
-  )
-  CloseSquareBracket* = Delimiters(
-    bits: 1 shl 6
-  )
-  CloseParenthesis* = Delimiters(
-    bits: 1 shl 7
-  )
+  DelimNone* = Delimiters(bits: 0'u8)
+  DelimCurlyBracketBlock* = Delimiters(bits: 1 shl 1)
+  DelimSemicolon* = Delimiters(bits: 1 shl 2)
+  DelimBang* = Delimiters(bits: 1 shl 3)
+  DelimComma* = Delimiters(bits: 1 shl 4)
+  CloseCurlyBracket* = Delimiters(bits: 1 shl 5)
+  CloseSquareBracket* = Delimiters(bits: 1 shl 6)
+  CloseParenthesis* = Delimiters(bits: 1 shl 7)
 
   uSemi = uint ';'
   uBang = uint '!'
@@ -93,39 +78,38 @@ const
 
 # TODO: welp, we can't make it an array, I guess
 const TABLE*: seq[Delimiters] = collect(newSeqOfCap(256)):
-  for x in 0..256:
+  for x in 0 .. 256:
     let ux = uint x
-    if ux notin [uSemi, uBang, uComma, uCBB, uCCB, uCSB, uCP]: DelimNone
+    if ux notin [uSemi, uBang, uComma, uCBB, uCCB, uCSB, uCP]:
+      DelimNone
     else:
       var res: Delimiters
       case ux
-      of uSemi: res = DelimSemicolon
-      of uBang: res = DelimBang
-      of uComma: res = DelimComma
-      of uCBB: res = DelimCurlyBracketBlock
-      of uCCB: res = CloseCurlyBracket
-      of uCSB: res = CloseSquareBracket
-      of uCP: res = CloseParenthesis
-      else: res = DelimNone # this can never happen
+      of uSemi:
+        res = DelimSemicolon
+      of uBang:
+        res = DelimBang
+      of uComma:
+        res = DelimComma
+      of uCBB:
+        res = DelimCurlyBracketBlock
+      of uCCB:
+        res = CloseCurlyBracket
+      of uCSB:
+        res = CloseSquareBracket
+      of uCP:
+        res = CloseParenthesis
+      else:
+        res = DelimNone
+        # this can never happen
 
       res
 
-proc newParserInput*(
-  input: string
-): ParserInput {.inline.} =
-  ParserInput(
-    tokenizer: newTokenizer(input),
-    cachedToken: none(CachedToken)
-  )
+proc newParserInput*(input: string): ParserInput {.inline.} =
+  ParserInput(tokenizer: newTokenizer(input), cachedToken: none(CachedToken))
 
-proc newParser*(
-  input: ParserInput
-): Parser {.inline.} =
-  Parser(
-    input: input,
-    atStartOf: none(BlockType),
-    stopBefore: DelimNone
-  )
+proc newParser*(input: ParserInput): Parser {.inline.} =
+  Parser(input: input, atStartOf: none(BlockType), stopBefore: DelimNone)
 
 proc contains*(self, other: Delimiters): bool {.inline.} =
   (self.bits and other.bits) != 0
@@ -139,44 +123,41 @@ proc fromChar*(c: Option[char]): Delimiters {.inline.} =
 proc currLine*(parser: Parser): string {.inline.} =
   parser.input.tokenizer.currentSourceLine()
 
-proc currSourceLocation*(
-  parser: Parser
-): SourceLocation {.inline.} =
+proc currSourceLocation*(parser: Parser): SourceLocation {.inline.} =
   parser.input.tokenizer.currSourceLocation()
 
 proc newBasicError*(
-  parser: Parser,
-  kind: BasicParseErrorKind
+    parser: Parser, kind: BasicParseErrorKind
 ): BasicParseError {.inline.} =
-  BasicParseError(
-    kind: kind,
-    location: parser.currSourceLocation()
-  )
+  BasicParseError(kind: kind, location: parser.currSourceLocation())
 
 proc reset*(parser: Parser, state: ParserState) {.inline.} =
   parser.input.tokenizer.reset(state)
   parser.atStartOf = state.atStartOf
 
 proc opening*(token: Token): Option[BlockType] {.inline, noSideEffect.} =
-  result = case token.kind
-  of tkFunction, tkParenBlock:
-    some(btParenthesis)
-  of tkSquareBracketBlock:
-    some(btSquareBracket)
-  of tkCurlyBracketBlock:
-    some(btCurlyBracket)
-  else: none(BlockType)
+  result =
+    case token.kind
+    of tkFunction, tkParenBlock:
+      some(btParenthesis)
+    of tkSquareBracketBlock:
+      some(btSquareBracket)
+    of tkCurlyBracketBlock:
+      some(btCurlyBracket)
+    else:
+      none(BlockType)
 
 proc closing*(token: Token): Option[BlockType] {.inline, noSideEffect.} =
-  result = case token.kind
-  of tkCloseParen: 
-    some(btParenthesis)
-  of tkCloseSquareBracket: 
-    some(btSquareBracket)
-  of tkCloseCurlyBracket:
-    some(btCurlyBracket)
-  else:
-    none(BlockType)
+  result =
+    case token.kind
+    of tkCloseParen:
+      some(btParenthesis)
+    of tkCloseSquareBracket:
+      some(btSquareBracket)
+    of tkCloseCurlyBracket:
+      some(btCurlyBracket)
+    else:
+      none(BlockType)
 
 proc `$`*(error: BasicParseError): string =
   case error.kind
@@ -203,15 +184,15 @@ proc parseError*(
   of bpUnexpectedToken:
     if not &token:
       raise newException(
-          ValueError, "bpUnexpectedToken passed, but `token` argument was left empty!"
-        )
+        ValueError, "bpUnexpectedToken passed, but `token` argument was left empty!"
+      )
 
     err.token = get(token)
   of bpAtRuleInvalid:
     if not &rule:
       raise newException(
-          ValueError, "bpAtRuleInvalid passed, but `rule` argument was left empty!"
-        )
+        ValueError, "bpAtRuleInvalid passed, but `rule` argument was left empty!"
+      )
 
     err.rule = get(rule)
   else:
@@ -219,7 +200,9 @@ proc parseError*(
 
   err
 
-proc basicUnexpectedTokenError*(location: SourceLocation, token: Token): BasicParseError {.inline.} =
+proc basicUnexpectedTokenError*(
+    location: SourceLocation, token: Token
+): BasicParseError {.inline.} =
   BasicParseError(kind: bpUnexpectedToken, token: token, location: location)
 
 proc position*(state: ParserState): SourcePosition {.inline.} =
@@ -258,17 +241,12 @@ proc skipWhitespace*(parser: Parser) {.inline.} =
   parser.input.tokenizer.skipWhitespace()
 
 proc newBasicUnexpectedTokenError*(
-  location: SourceLocation, 
-  token: Token
+    location: SourceLocation, token: Token
 ): BasicParseError {.inline.} =
-  BasicParseError(
-    kind: bpUnexpectedToken,
-    token: token
-  )
+  BasicParseError(kind: bpUnexpectedToken, token: token)
 
 proc newBasicUnexpectedTokenError*(
-  parser: Parser,
-  token: Token
+    parser: Parser, token: Token
 ): BasicParseError {.inline.} =
   newBasicUnexpectedTokenError(parser.currSourceLocation(), token)
 
@@ -283,11 +261,11 @@ proc state*(parser: Parser): ParserState {.inline.} =
     atStartOf: parser.atStartOf,
     position: parser.input.tokenizer.pos,
     currentLineStartPos: parser.input.tokenizer.currLineStartPos,
-    currentLineNumber: parser.input.tokenizer.currLineNumber
+    currentLineNumber: parser.input.tokenizer.currLineNumber,
   )
 
 proc nextIncludingWhitespaceAndComments*(
-  parser: Parser
+    parser: Parser
 ): Result[Token, BasicParseError] =
   var blockType: BlockType
   if &parser.atStartOf:
@@ -296,41 +274,37 @@ proc nextIncludingWhitespaceAndComments*(
 
   let c = parser.input.tokenizer.nextChar()
   if parser.stopBefore.contains(fromChar(some c)):
-    return err(
-      parser.newBasicError(
-        bpEndOfInput
-      )
-    )
+    return err(parser.newBasicError(bpEndOfInput))
 
   let
     tokenStartPos = parser.input.tokenizer.position()
-    usingCachedToken = if parser.input.cachedToken.isSome:
-      parser.input.cachedToken.unsafeGet().startPos == tokenStartPos
-    else:
-      false
+    usingCachedToken =
+      if parser.input.cachedToken.isSome:
+        parser.input.cachedToken.unsafeGet().startPos == tokenStartPos
+      else:
+        false
 
   var token: Token
 
   if usingCachedToken:
-    let cachedToken = parser.input.cachedToken.unsafeGet() # we already verified that it isn't an empty option, so it's fine (hopefully)
+    let cachedToken = parser.input.cachedToken.unsafeGet()
+      # we already verified that it isn't an empty option, so it's fine (hopefully)
     parser.input.tokenizer.reset(cachedToken.endState)
     case cachedToken.token.kind
     of tkFunction:
       parser.input.tokenizer.seeFunction(cachedToken.token.fnName)
-    else: discard
+    else:
+      discard
 
     token = cachedToken.token
   else:
-    let newToken = parser
-      .input
-      .tokenizer
-      .nextToken()
+    let newToken = parser.input.tokenizer.nextToken()
 
     parser.input.cachedToken = some(
       CachedToken(
         token: newToken,
         startPos: tokenStartPos,
-        endState: parser.input.tokenizer.state()
+        endState: parser.input.tokenizer.state(),
       )
     )
 
@@ -348,9 +322,9 @@ proc next*(parser: Parser): Result[Token, BasicParseError] =
   parser.nextIncludingWhitespaceAndComments()
 
 proc expect*[T](
-  parser: Parser,
-  wants: openArray[TokenKind],
-  fn: proc(token: Token): Result[T, BasicParseError]
+    parser: Parser,
+    wants: openArray[TokenKind],
+    fn: proc(token: Token): Result[T, BasicParseError],
 ): Result[T, BasicParseError] {.inline.} =
   let
     start = parser.currSourceLocation()
@@ -359,65 +333,47 @@ proc expect*[T](
   if next.isOk:
     let value {.inject.} = next.get()
     if value.kind notin wants:
-      return err(
-        start.newBasicUnexpectedTokenError(deepCopy value)
-      )
+      return err(start.newBasicUnexpectedTokenError(deepCopy value))
     else:
       return fn(value)
   else:
     return err(next.error())
 
-proc expectExhausted*(
-  parser: Parser
-): Result[bool, BasicParseError] =
-  let 
+proc expectExhausted*(parser: Parser): Result[bool, BasicParseError] =
+  let
     start = parser.state
     next = parser.next()
 
-    res = case next.isErr()
-    of false:
-      err(
-        start
-          .sourceLocation()
-          .basicUnexpectedTokenError(next.get())
-      )
-    of true:
-      err(
-        BasicParseError(
-          kind: bpEndOfInput
-        )
-      )
+    res =
+      case next.isErr()
+      of false:
+        err(start.sourceLocation().basicUnexpectedTokenError(next.get()))
+      of true:
+        err(BasicParseError(kind: bpEndOfInput))
 
   parser.reset(start)
   res
 
-proc position*(
-  parser: Parser
-): SourcePosition {.inline.} =
+proc position*(parser: Parser): SourcePosition {.inline.} =
   parser.input.tokenizer.position()
 
 proc newError*(parser: Parser, err: BasicParseError): ParseError {.inline.} =
   ParseError[BasicParseError] (
-    kind: peBasic,
-    basic: err,
-    location: parser.currSourceLocation()
+    kind: peBasic, basic: err, location: parser.currSourceLocation()
   )
 
 proc newErrorForNextToken*(parser: Parser): ParseError {.inline.} =
   let t = parser.next()
-  
-  let token = if t.isOk:
-    deepCopy(t)
 
-  let err = if t.isErr:
-    t.error()
+  let token =
+    if t.isOk:
+      deepCopy(t)
 
-  parser.newError(
-    BasicParseError(
-      kind: bpUnexpectedToken,
-      token: token
-    )
-  )
+  let err =
+    if t.isErr:
+      t.error()
+
+  parser.newError(BasicParseError(kind: bpUnexpectedToken, token: token))
 
 proc nextChar*(parser: Parser): Option[char] {.inline.} =
   let c = some parser.input.tokenizer.nextChar()
@@ -435,10 +391,9 @@ proc seenVarOrEnvFunctions*(parser: Parser): bool {.inline.} =
 
 # generics hell 2: electric boogaloo
 proc tryParse*[T, E](
-  parser: Parser,
-  thing: proc(parser: Parser): Result[T, E]
+    parser: Parser, thing: proc(parser: Parser): Result[T, E]
 ): Result[T, E] =
-  let 
+  let
     start = parser.state()
     res = thing(parser)
 
@@ -447,39 +402,29 @@ proc tryParse*[T, E](
 
   res
 
-proc slice*(
-  parser: Parser,
-  range: Slice[SourcePosition]
-): string {.inline.} =
+proc slice*(parser: Parser, range: Slice[SourcePosition]): string {.inline.} =
   parser.input.tokenizer.slice(range)
 
-proc sliceFrom*(
-  parser: Parser,
-  start: SourcePosition
-): string {.inline.} =
+proc sliceFrom*(parser: Parser, start: SourcePosition): string {.inline.} =
   parser.input.tokenizer.sliceFrom(start)
 
 proc parseEntirely*[T, E](
-  parser: Parser,
-  parse: proc(parser: Parser): Result[T, ParseError[E]]
-): Result[T, ParseError[E]]  {.inline.} =
+    parser: Parser, parse: proc(parser: Parser): Result[T, ParseError[E]]
+): Result[T, ParseError[E]] {.inline.} =
   let res = parse parser
   discard parser.expectExhausted()
   res
 
 proc parseUntilBefore*[T, E](
-  parser: Parser,
-  delimiters: Delimiters,
-  errorBehaviour: ParseUntilErrorBehaviour,
-  parse: proc(parser: Parser): Result[T, ParseError[E]]
+    parser: Parser,
+    delimiters: Delimiters,
+    errorBehaviour: ParseUntilErrorBehaviour,
+    parse: proc(parser: Parser): Result[T, ParseError[E]],
 ) =
   let delimiters = parser.stopBefore or delimiters
 
-  var delimitedParser = Parser(
-    input: parser.input,
-    atStartOf: parser.atStartOf,
-    stopBefore: delimiters
-  )
+  var delimitedParser =
+    Parser(input: parser.input, atStartOf: parser.atStartOf, stopBefore: delimiters)
   let res = delimitedParser.parseEntirely(parse)
   if errorBehaviour == peStop and res.isErr:
     return res
@@ -505,17 +450,17 @@ proc parseUntilBefore*[T, E](
   res
 
 proc parseUntilBefore*[T, E](
-  parser: Parser,
-  delimiters: Delimiters,
-  parse: proc(parser: Parser): Result[T, ParseError[E]]
+    parser: Parser,
+    delimiters: Delimiters,
+    parse: proc(parser: Parser): Result[T, ParseError[E]],
 ) {.inline.} =
   parseUntilBefore(parser, delimiters, peConsume, parse)
 
 proc parseUntilAfter*[T, E](
-  parser: Parser,
-  delimiters: Delimiters,
-  errorBehaviour: ParseUntilErrorBehaviour,
-  parse: proc(parser: Parser): Result[T, ParseError[E]]
+    parser: Parser,
+    delimiters: Delimiters,
+    errorBehaviour: ParseUntilErrorBehaviour,
+    parse: proc(parser: Parser): Result[T, ParseError[E]],
 ) {.inline.} =
   let res = parseUntilBefore(parser, delimiters, errorBehaviour, parse)
   if errorBehaviour == peStop and res.isErr:
@@ -530,9 +475,9 @@ proc parseUntilAfter*[T, E](
   res
 
 proc parseUntilAfter*[T, E](
-  parser: Parser,
-  delimiters: Delimiters,
-  parse: proc(parser: Parser): Result[T, ParseError[E]]
+    parser: Parser,
+    delimiters: Delimiters,
+    parse: proc(parser: Parser): Result[T, ParseError[E]],
 ) {.inline.} =
   parseUntilAfter(parser, delimiters, peConsume, parse)
 
@@ -551,7 +496,7 @@ proc nextIncludingWhitespace*(parser: Parser): Result[Token, BasicParseError] =
   ok(parser.input.cachedToken.get().token)
 
 proc expectWhitespace*(parser: Parser): Result[string, BasicParseError] {.inline.} =
-  let 
+  let
     start = parser.currSourceLocation()
     next = parser.nextIncludingWhitespace().get()
 
@@ -559,36 +504,28 @@ proc expectWhitespace*(parser: Parser): Result[string, BasicParseError] {.inline
   of tkWhitespace:
     return ok(next.wsStr)
   else:
-    err(
-      start.newBasicUnexpectedTokenError(deepCopy next)
-    )
+    err(start.newBasicUnexpectedTokenError(deepCopy next))
 
 proc parseNestedBlock*[T, E](
-  parser: Parser, 
-  parse: proc(parser: Parser): Result[T, E]
+    parser: Parser, parse: proc(parser: Parser): Result[T, E]
 ): Result[T, E] =
   if parser.atStartOf.isNone:
     raise newException(
       ParserDefect,
       "A nested parser can only be created when a tkFunction, tkParenBlock, tkSquareBracketBlock or tkCurlyBracketBlock " &
-      "token was just consumed."
+        "token was just consumed.",
     )
 
-  let 
+  let
     blockType = parser.atStartOf.unsafeGet()
-    closingDelim = case blockType:
-      of btCurlyBracket:
-        CloseCurlyBracket
-      of btSquareBracket:
-        CloseSquareBracket
-      of btParenthesis:
-        CloseParenthesis
+    closingDelim =
+      case blockType
+      of btCurlyBracket: CloseCurlyBracket
+      of btSquareBracket: CloseSquareBracket
+      of btParenthesis: CloseParenthesis
 
-  var nestedParser = Parser(
-    input: parser.input,
-    atStartOf: none(BlockType),
-    stopBefore: closingDelim
-  )
+  var nestedParser =
+    Parser(input: parser.input, atStartOf: none(BlockType), stopBefore: closingDelim)
 
   let res = nestedParser.parseEntirely(parse)
 
@@ -602,16 +539,17 @@ proc parseNestedBlock*[T, E](
 
 proc expectIdent*(parser: Parser): Result[string, BasicParseError] {.inline.} =
   # FIXME: this is incredibly dumb!
-  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+  proc inner(
+      token: Token
+  ): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
     ok(token.ident)
 
   expect parser, [tkIdent], (token: Token) => inner token
 
 proc expectIdentMatching*(
-  parser: Parser,
-  expectedValue: string
+    parser: Parser, expectedValue: string
 ): Result[string, BasicParseError] {.inline.} =
-  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+  proc inner(token: Token): Result[string, BasicParseError] {.gcsafe, noSideEffect.} =
     if token.ident.toLowerAscii() == expectedValue:
       ok token.ident
     else:
@@ -620,19 +558,24 @@ proc expectIdentMatching*(
   expect parser, [tkIdent], (token: Token) => inner token
 
 proc expectString*(parser: Parser): Result[string, BasicParseError] {.inline.} =
-  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+  proc inner(
+      token: Token
+  ): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
     ok(token.qStr)
 
   expect parser, [tkQuotedString], (token: Token) => inner token
 
 proc expectIdentOrString*(parser: Parser): Result[string, BasicParseError] {.inline.} =
-  proc inner(token: Token): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
+  proc inner(
+      token: Token
+  ): Result[string, BasicParseError] {.inline, gcsafe, noSideEffect.} =
     case token.kind
     of tkIdent:
       return ok token.ident
     of tkQuotedString:
       return ok token.qStr
-    else: discard
+    else:
+      discard
 
   expect parser, [tkIdent, tkQuotedString], (token: Token) => inner token
 
@@ -648,20 +591,16 @@ proc expectUrl*(parser: Parser): Result[string, BasicParseError] {.inline.} =
           if str.isOk:
             return ok(str.get())
           else:
-            return err(
-              ParseError[BasicParseError](
-                kind: peBasic,
-                basic: str.error()
-              )
-            )
-        
+            return err(ParseError[BasicParseError](kind: peBasic, basic: str.error()))
+
         # TODO: wtf is this and why does it work?
         let res = parser.parseNestedBlock(parseFn)
         if not res.isOk:
           return res.error().basic.err()
         else:
           return res.get().ok()
-    else: discard
+    else:
+      discard
 
   expect parser, [tkUnquotedUrl, tkFunction], (token: Token) => inner token
 
@@ -680,29 +619,27 @@ proc expectUrlOrString*(parser: Parser): Result[string, BasicParseError] {.inlin
           if str.isOk:
             return ok(str.get())
           else:
-            return err(
-              ParseError[BasicParseError](
-                kind: peBasic,
-                basic: str.error()
-              )
-            )
-        
+            return err(ParseError[BasicParseError](kind: peBasic, basic: str.error()))
+
         # TODO: wtf is this and why does it work?
         let res = parser.parseNestedBlock(parseFn)
         if not res.isOk:
           return res.error().basic.err()
         else:
           return res.get().ok()
-    else: discard
+    else:
+      discard
 
-  expect parser, [tkUnquotedUrl, tkQuotedString, tkFunction], (token: Token) => inner token
+  expect parser,
+    [tkUnquotedUrl, tkQuotedString, tkFunction], (token: Token) => inner token
 
 proc expectNumber*(parser: Parser): Result[float32, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[float32, BasicParseError] {.inline.} =
     case token.kind
     of tkNumber:
       return ok token.nValue
-    else: discard
+    else:
+      discard
 
   expect parser, [tkNumber], (token: Token) => inner token
 
@@ -711,7 +648,8 @@ proc expectInt*(parser: Parser): Result[int32, BasicParseError] {.inline.} =
     case token.kind
     of tkNumber:
       return ok token.nIntVal.get()
-    else: discard
+    else:
+      discard
 
   expect parser, [tkNumber], (token: Token) => inner token
 
@@ -720,61 +658,100 @@ proc expectPercentage*(parser: Parser): Result[float32, BasicParseError] {.inlin
     case token.kind
     of tkPercentage:
       return ok token.pUnitValue
-    else: discard
+    else:
+      discard
 
   expect parser, [tkPercentage], (token: Token) => inner token
 
 proc expectColon*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkColon], (token: Token) => inner token
 
 proc expectSemicolon*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkSemicolon], (token: Token) => inner token
 
 proc expectComma*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkComma], (token: Token) => inner token
 
 proc expectDelim*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkDelim], (token: Token) => inner token
 
-proc expectCurlyBracketBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+proc expectCurlyBracketBlock*(
+    parser: Parser
+): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkCurlyBracketBlock], (token: Token) => inner token
 
-proc expectSquareBracketBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+proc expectSquareBracketBlock*(
+    parser: Parser
+): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkSquareBracketBlock], (token: Token) => inner token
 
 proc expectParenBlock*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkParenBlock], (token: Token) => inner token
 
 proc expectFunction*(parser: Parser): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
-    return
+    return ok()
 
   expect parser, [tkFunction], (token: Token) => inner token
 
-proc expectFunctionMatching*(parser: Parser, name: string): Result[void, BasicParseError] {.inline.} =
+proc expectFunctionMatching*(
+    parser: Parser, name: string
+): Result[void, BasicParseError] {.inline.} =
   proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
     if token.fnName.toLowerAscii() == name:
       return ok()
 
   expect parser, [tkFunction], (token: Token) => inner token
+
+proc expectNoErrorToken*(parser: Parser): Result[void, BasicParseError] {.inline.} =
+  while true:
+    let next = parser.nextIncludingWhitespaceAndComments()
+    if next.isErr:
+      return ok()
+
+    let token = get next
+
+    case token.kind
+    of tkFunction:
+      return ok()
+    of tkParenBlock:
+      return ok()
+    of tkSquareBracketBlock:
+      return ok()
+    of tkCurlyBracketBlock:
+      proc parseFn(parser: Parser): Result[void, ParseError[BasicParseError]] =
+        let res = parser.expectNoErrorToken()
+        if res.isErr:
+          return err(ParseError[BasicParseError](kind: peBasic, basic: res.error()))
+        else:
+          return ok()
+
+      let parsed = parser.parseNestedBlock(parseFn)
+      if parsed.isErr:
+        return err(parsed.error().basic)
+      else:
+        return ok()
+    else:
+      if token.isParseError():
+        return err(parser.newBasicUnexpectedTokenError(deepCopy token))

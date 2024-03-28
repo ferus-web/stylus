@@ -13,18 +13,20 @@ proc get*(s: string, idx: int): Option[char] {.inline.} =
     return some(s[idx])
 
 type
-  TokenizerDefect* = object of Defect ## An unrecoverable error that the tokenizer might raise
-  Tokenizer* = ref object
-    ## The tokenizer struct itself
-    input*: string                              ## The input string
-    pos*: uint                                  ## The current position of the character we're at
-    currLineStartPos*: uint                     ## Where the current line starts at
-    currLineNumber*: uint32                     ## The current line number
-    varOrEnvFunctions: SeenStatus               ## Whether we've seen any var or env functions
-    sourceMapUrl, sourceUrl: Option[string]     ## Source + Source Map URLs
+  TokenizerDefect* = object of Defect
+    ## An unrecoverable error that the tokenizer might raise
 
-  QuotedString* = Result[string, string] ## A quoted string, first value is a successfully parsed string, 
-                                         ## and second one is an error if there's a bad string
+  Tokenizer* = ref object ## The tokenizer struct itself
+    input*: string ## The input string
+    pos*: uint ## The current position of the character we're at
+    currLineStartPos*: uint ## Where the current line starts at
+    currLineNumber*: uint32 ## The current line number
+    varOrEnvFunctions: SeenStatus ## Whether we've seen any var or env functions
+    sourceMapUrl, sourceUrl: Option[string] ## Source + Source Map URLs
+
+  QuotedString* = Result[string, string]
+    ## A quoted string, first value is a successfully parsed string, 
+    ## and second one is an error if there's a bad string
 
 proc newTokenizer*(input: string): Tokenizer {.inline.} =
   ## Create a new tokenizer with `input`, a CSS3 string
@@ -39,7 +41,7 @@ proc newTokenizer*(input: string): Tokenizer {.inline.} =
 proc currSourceLocation*(tokenizer: Tokenizer): SourceLocation {.inline.} =
   SourceLocation(
     line: tokenizer.currLineNumber,
-    column: (tokenizer.pos - tokenizer.currLineStartPos + 1).uint32
+    column: (tokenizer.pos - tokenizer.currLineStartPos + 1).uint32,
   )
 
 proc reset*(tokenizer: Tokenizer, state: ParserState) {.inline.} =
@@ -75,17 +77,15 @@ proc isEof*(tokenizer: Tokenizer): bool {.inline, gcsafe, noSideEffect.} =
 
 proc startsWith*(tokenizer: Tokenizer, needle: string): bool {.inline.} =
   ## Does the following data start with `needle`?
-  tokenizer.input[tokenizer.pos..tokenizer.input.len - 1].startsWith(needle)
+  tokenizer.input[tokenizer.pos .. tokenizer.input.len - 1].startsWith(needle)
 
 proc slice*(tokenizer: Tokenizer, start, stop: uint): string {.inline.} =
   ## Get a slice of the input from `start` to `stop`
-  tokenizer.input[start..stop]
+  tokenizer.input[start .. stop]
 
 proc slice*(tokenizer: Tokenizer, range: Slice[SourcePosition]): string {.inline.} =
   ## Same as above, but uses a slice of `SourcePosition`s instead of two separate `uint` arguments.
-  tokenizer.slice(
-    range.a, range.b
-  )
+  tokenizer.slice(range.a, range.b)
 
 proc charAt*(tokenizer: Tokenizer, offset: uint = 0'u): char {.inline, noSideEffect.} =
   ## Get the character at our current position + `offset`.
@@ -99,7 +99,7 @@ proc state*(tokenizer: Tokenizer): ParserState {.inline, noSideEffect.} =
     position: tokenizer.position,
     currentLineStartPos: tokenizer.currLineStartPos,
     currentLineNumber: tokenizer.currLineNumber,
-    atStartOf: none(BlockType)
+    atStartOf: none(BlockType),
   )
 
 proc nextChar*(tokenizer: Tokenizer): char {.inline, noSideEffect.} =
@@ -118,11 +118,11 @@ proc charToDecimalDigit*(c: char): Option[uint32] {.inline.} =
 proc charToHexDigit*(c: char): Option[uint32] {.inline.} =
   let b = cast[uint8](c)
   case c
-  of {'0'..'9'}:
+  of {'0' .. '9'}:
     (b - uint8 '0').uint32.some
-  of {'a'..'f'}:
+  of {'a' .. 'f'}:
     (b - (uint8 'a') + 10'u8).uint32.some
-  of {'A'..'F'}:
+  of {'A' .. 'F'}:
     (b - (uint8 'A') + 10'u8).uint32.some
   else:
     none(uint32)
@@ -176,47 +176,48 @@ proc sliceFrom*(tokenizer: Tokenizer, start: uint): string {.inline, noSideEffec
 
     return thing
 
-  tokenizer.input[start..tokenizer.pos - 1]
+  tokenizer.input[start .. tokenizer.pos - 1]
 
 proc consumeChar*(tokenizer: Tokenizer): char {.inline.} =
-  let 
+  let
     c = tokenizer.nextChar()
     lenUtf8 = Rune(c).size().uint
 
   tokenizer.pos += lenUtf8
-  tokenizer.currLineStartPos = tokenizer.currLineStartPos + (lenUtf8) # FIXME: not standards compliant! subtract the UTF-16 length from the UTF-8 length!
+  tokenizer.currLineStartPos = tokenizer.currLineStartPos + (lenUtf8)
+    # FIXME: not standards compliant! subtract the UTF-16 length from the UTF-8 length!
 
   c
 
 proc hasNewlineAt*(
-  tokenizer: Tokenizer, offset: uint
+    tokenizer: Tokenizer, offset: uint
 ): bool {.inline, gcsafe, noSideEffect.} =
   ## Is there a newline at `offset`?
   tokenizer.pos + offset < tokenizer.input.len.uint and
     tokenizer.charAt(offset) in ['\n', '\r', '\x0C']
 
-proc currentSourceLine*(
-  tokenizer: Tokenizer
-): string =
-  let 
+proc currentSourceLine*(tokenizer: Tokenizer): string =
+  let
     curr = tokenizer.pos
-    rstart = tokenizer.slice(0'u64, uint64 curr)
-      .rfind({'\r', '\n', '\x0C'})
-    
-    start = case rstart
-    of -1: 
-      0
-    else:
-      rstart + 1
+    rstart = tokenizer.slice(0'u64, uint64 curr).rfind({'\r', '\n', '\x0C'})
 
-    rending = tokenizer.slice(uint64 curr, uint64 (tokenizer.input.len-1))
-      .find({'\r', '\n', '\x0C'})
-    
-    ending = case rending
-    of -1:
-      tokenizer.input.len-1
-    else:
-      rending + 1
+    start =
+      case rstart
+      of -1:
+        0
+      else:
+        rstart + 1
+
+    rending = tokenizer.slice(uint64 curr, uint64 (tokenizer.input.len - 1)).find(
+        {'\r', '\n', '\x0C'}
+      )
+
+    ending =
+      case rending
+      of -1:
+        tokenizer.input.len - 1
+      else:
+        rending + 1
 
   tokenizer.slice(uint64 start, uint64 ending)
 
@@ -246,14 +247,14 @@ proc isIdentStart*(tokenizer: Tokenizer): bool {.inline.} =
     return false
 
   case tokenizer.nextChar()
-  of {'a'..'z'}, {'A'..'Z'}, '_', '\0':
+  of {'a' .. 'z'}, {'A' .. 'Z'}, '_', '\0':
     return true
   of '-':
     if not tokenizer.hasAtLeast(1):
       return false
 
     case tokenizer.charAt(1)
-    of {'a'..'z'}, {'A'..'Z'}, '-', '_', '\0':
+    of {'a' .. 'z'}, {'A' .. 'Z'}, '-', '_', '\0':
       return true
     of '\\':
       return not tokenizer.hasNewlineAt(1)
@@ -271,7 +272,7 @@ proc checkForSourceMap*(tokenizer: Tokenizer, contents: string) =
     directiveOld = "@ sourceMappingURL="
 
   if contents.startsWith(directive) or contents.startsWith(directiveOld):
-    let contents = contents[directive.len..contents.len]
+    let contents = contents[directive.len .. contents.len]
     tokenizer.sourceMapUrl = contents.some() # FIXME: this is not compliant!
 
   let
@@ -279,9 +280,10 @@ proc checkForSourceMap*(tokenizer: Tokenizer, contents: string) =
     directiveBOld = "@ sourceURL="
 
   if contents.startsWith(directiveB) or contents.startsWith(directiveBOld):
-    let contents = contents[directiveB.len..contents.len]
-    var final: string = newString(contents.len) # best case: there's nothing to be removed, so we won't have to allocate more memory, otherwise this will waste memory
-    
+    let contents = contents[directiveB.len .. contents.len]
+    var final: string = newString(contents.len)
+      # best case: there's nothing to be removed, so we won't have to allocate more memory, otherwise this will waste memory
+
     for i, c in contents:
       if c notin [' ', '\t', '\x0C', '\r', '\n']:
         final[i] = c
@@ -301,7 +303,7 @@ proc consumeEscape*(tokenizer: Tokenizer): char =
     return '\0' # FIXME: this is not standards compliant!
 
   case tokenizer.nextChar()
-  of {'0'..'9'}, {'A'..'F'}, {'a'..'f'}:
+  of {'0' .. '9'}, {'A' .. 'F'}, {'a' .. 'f'}:
     let (c, _) = tokenizer.consumeHexDigits()
     if not tokenizer.isEof():
       case tokenizer.nextChar()
@@ -309,7 +311,8 @@ proc consumeEscape*(tokenizer: Tokenizer): char =
         tokenizer.forwards(1)
       of '\n', '\x0C', '\r':
         tokenizer.consumeNewline()
-      else: discard
+      else:
+        discard
 
     let replacementChar = '\0' # FIXME: this is not standards compliant!
     if c != 0:
@@ -340,15 +343,15 @@ proc consumeName*(tokenizer: Tokenizer): string =
       return tokenizer.sliceFrom(start)
 
     case tokenizer.nextChar()
-    of {'a'..'z'}, {'A'..'Z'}, {'0'..'9'}, '_', '-':
+    of {'a' .. 'z'}, {'A' .. 'Z'}, {'0' .. '9'}, '_', '-':
       tokenizer.forwards(1)
     of '\\', '\0':
       value = tokenizer.sliceFrom(start)
-    of {'\x80'..'\xBF'}:
+    of {'\x80' .. '\xBF'}:
       tokenizer.consumeContinuationByte()
-    of {'\xC0'..'\xEF'}:
+    of {'\xC0' .. '\xEF'}:
       tokenizer.forwards(1)
-    of {'\xF0'..'\xFF'}:
+    of {'\xF0' .. '\xFF'}:
       tokenizer.consume4byteIntro()
     else:
       return tokenizer.sliceFrom(start)
@@ -356,7 +359,7 @@ proc consumeName*(tokenizer: Tokenizer): string =
   while not tokenizer.isEof():
     let c = tokenizer.nextChar()
     case c
-    of {'a'..'z'}, {'A'..'Z'}, {'0'..'9'}, '_', '-':
+    of {'a' .. 'z'}, {'A' .. 'Z'}, {'0' .. '9'}, '_', '-':
       tokenizer.forwards(1)
       value &= c
     of '\\':
@@ -368,13 +371,13 @@ proc consumeName*(tokenizer: Tokenizer): string =
     of '\0':
       tokenizer.forwards(1)
       value &= "\u{FFFD}"
-    of {'\x80'..'\xBF'}:
+    of {'\x80' .. '\xBF'}:
       tokenizer.consumeContinuationByte()
       value &= c
-    of {'\xC0'..'\xEF'}:
+    of {'\xC0' .. '\xEF'}:
       tokenizer.forwards(1)
       value &= c
-    of {'\xF0'..'\xFF'}:
+    of {'\xF0' .. '\xFF'}:
       tokenizer.consume4byteIntro()
       value &= c
     else:
@@ -383,15 +386,14 @@ proc consumeName*(tokenizer: Tokenizer): string =
   value
 
 proc consumeNumeric*(tokenizer: Tokenizer): Token =
-  let
-    (hasSign, sign) =
-      case tokenizer.nextChar()
-      of '-':
-        (true, -1f)
-      of '+':
-        (true, 1f)
-      else:
-        (false, 1f)
+  let (hasSign, sign) =
+    case tokenizer.nextChar()
+    of '-':
+      (true, -1f)
+    of '+':
+      (true, 1f)
+    else:
+      (false, 1f)
 
   if hasSign:
     tokenizer.forwards(1)
@@ -411,7 +413,7 @@ proc consumeNumeric*(tokenizer: Tokenizer): Token =
     fractionalPart: float64 = 0'f64
 
   if tokenizer.hasAtleast(1) and tokenizer.nextChar() == '.' and
-      tokenizer.charAt(1) in {'0'..'9'}:
+      tokenizer.charAt(1) in {'0' .. '9'}:
     isInteger = false
     tokenizer.forwards(1)
 
@@ -426,21 +428,20 @@ proc consumeNumeric*(tokenizer: Tokenizer): Token =
 
   var value = sign * (integralPart + fractionalPart)
   if tokenizer.hasAtleast(1) and tokenizer.nextChar() in ['e', 'E']:
-    if tokenizer.charAt(1) in {'0'..'9'} or
+    if tokenizer.charAt(1) in {'0' .. '9'} or
         tokenizer.hasAtleast(2) and tokenizer.charAt(1) in ['+', '-'] and
-        tokenizer.charAt(2) in {'0'..'9'}:
+        tokenizer.charAt(2) in {'0' .. '9'}:
       isInteger = false
       tokenizer.forwards(1)
 
-      let
-        (hasSign, sign) =
-          case tokenizer.nextChar()
-          of '-':
-            (true, -1f)
-          of '+':
-            (true, 1f)
-          else:
-            (false, 1f)
+      let (hasSign, sign) =
+        case tokenizer.nextChar()
+        of '-':
+          (true, -1f)
+        of '+':
+          (true, 1f)
+        else:
+          (false, 1f)
 
       if hasSign:
         tokenizer.forwards(1)
@@ -455,41 +456,40 @@ proc consumeNumeric*(tokenizer: Tokenizer): Token =
 
       value *= pow(10'f64, sign * exponent)
 
-  let
-    intValue: Option[int32] =
-      case isInteger
-      of true:
-        some(
-          if value >= int32.high.float64:
-            int32.high
-          elif value <= int32.low.float64:
-            int32.low
-          else:
-            value.int32
-        )
-      else:
-        none(int32)
+  let intValue: Option[int32] =
+    case isInteger
+    of true:
+      some(
+        if value >= int32.high.float64:
+          int32.high
+        elif value <= int32.low.float64:
+          int32.low
+        else:
+          value.int32
+      )
+    else:
+      none(int32)
 
   if not tokenizer.isEof() and tokenizer.nextChar() == '%':
     tokenizer.forwards(1)
     return Token(
-        kind: tkPercentage,
-        pHasSign: hasSign,
-        pIntVal: intValue,
-        pUnitValue: (value / 100'f64).float32,
-      )
+      kind: tkPercentage,
+      pHasSign: hasSign,
+      pIntVal: intValue,
+      pUnitValue: (value / 100'f64).float32,
+    )
 
   let valF32 = value.float32
 
   if tokenizer.isIdentStart():
     let unit = tokenizer.consumeName()
     return Token(
-        kind: tkDimension,
-        dHasSign: hasSign,
-        dValue: valF32,
-        dIntVal: intValue,
-        unit: unit,
-      )
+      kind: tkDimension,
+      dHasSign: hasSign,
+      dValue: valF32,
+      dIntVal: intValue,
+      unit: unit,
+    )
   else:
     return Token(kind: tkNumber, nHasSign: hasSign, nValue: valF32, nIntVal: intValue)
 
@@ -521,9 +521,9 @@ proc consumeQuotedString*(tokenizer: Tokenizer, singleQuote: bool): QuotedString
       break
     of '\n', '\r', '\x0C':
       return err(tokenizer.sliceFrom(start))
-    of {'\x80'..'\xBF'}:
+    of {'\x80' .. '\xBF'}:
       tokenizer.consumeContinuationByte()
-    of {'\xF0'..'\xFF'}:
+    of {'\xF0' .. '\xFF'}:
       tokenizer.consume4byteIntro()
     else:
       tokenizer.forwards(1)
@@ -554,9 +554,9 @@ proc consumeQuotedString*(tokenizer: Tokenizer, singleQuote: bool): QuotedString
     of '\0':
       tokenizer.forwards(1)
       str &= ' ' # FIXME: not compliant.
-    of {'\x80'..'\xBF'}:
+    of {'\x80' .. '\xBF'}:
       tokenizer.consumeContinuationByte()
-    of {'\xF0'..'\xFF'}:
+    of {'\xF0' .. '\xFF'}:
       tokenizer.consume4byteIntro()
     else:
       tokenizer.forwards(1)
@@ -590,9 +590,9 @@ proc consumeComment*(tokenizer: Tokenizer): string =
         return contents
     of '\n', '\x0C', '\r':
       tokenizer.consumeNewline()
-    of {'\x80'..'\xBF'}:
+    of {'\x80' .. '\xBF'}:
       tokenizer.consumeContinuationByte()
-    of {'\xF0'..'\xFF'}:
+    of {'\xF0' .. '\xFF'}:
       tokenizer.consume4byteIntro()
     else:
       tokenizer.forwards(1)
@@ -609,7 +609,7 @@ proc seeFunction*(tokenizer: Tokenizer, value: var string) =
 proc consumeUnquotedUrl*(tokenizer: Tokenizer): Option[Token] =
   let
     start = tokenizer.pos
-    fromStart = tokenizer.input[tokenizer.pos..tokenizer.input.len - 1]
+    fromStart = tokenizer.input[tokenizer.pos .. tokenizer.input.len - 1]
 
   var
     newlines = 0
@@ -703,15 +703,15 @@ proc consumeUnquotedUrl*(tokenizer: Tokenizer): Option[Token] =
         let value = tokenizer.sliceFrom(start)
         tokenizer.forwards(1)
         return Token(kind: tkUnquotedUrl, uqUrl: value)
-      of {'\x01'..'\x08'}, '\x0B', {'\x0E'..'\x1F'}, '\x7F', '"', '\'', '(':
+      of {'\x01' .. '\x08'}, '\x0B', {'\x0E' .. '\x1F'}, '\x7F', '"', '\'', '(':
         tokenizer.forwards(1)
         return consumeBadUrl(start)
       of '\\', '\0':
         str = cast[seq[char]](tokenizer.sliceFrom(start))
         break
-      of {'\x80'..'\xBF'}:
+      of {'\x80' .. '\xBF'}:
         tokenizer.consumeContinuationByte()
-      of {'\xF0'..'\xFF'}:
+      of {'\xF0' .. '\xFF'}:
         tokenizer.consume4byteIntro()
       else:
         tokenizer.forwards(1)
@@ -725,7 +725,7 @@ proc consumeUnquotedUrl*(tokenizer: Tokenizer): Option[Token] =
       of ')':
         tokenizer.forwards(1)
         break
-      of {'\x01'..'\x08'}, '\x0B', {'\x0E'..'\x1F'}, '\x7F', '"', '\'', '(':
+      of {'\x01' .. '\x08'}, '\x0B', {'\x0E' .. '\x1F'}, '\x7F', '"', '\'', '(':
         tokenizer.forwards(1)
         return consumeBadUrl(start)
       of '\\':
@@ -737,10 +737,10 @@ proc consumeUnquotedUrl*(tokenizer: Tokenizer): Option[Token] =
       of '\0':
         tokenizer.forwards(1)
         str &= "\u{FFFD}"
-      of {'\x80'..'\xBF'}:
+      of {'\x80' .. '\xBF'}:
         tokenizer.consumeContinuationByte()
         str &= c
-      of {'\xF0'..'\xFF'}:
+      of {'\xF0' .. '\xFF'}:
         tokenizer.consume4byteIntro()
         str &= c
       else:
@@ -787,9 +787,7 @@ proc skipWhitespace*(tokenizer: Tokenizer) =
     else:
       return
 
-proc skipCdcAndCdo*(
-  tokenizer: Tokenizer
-) =
+proc skipCdcAndCdo*(tokenizer: Tokenizer) =
   while not tokenizer.isEof():
     case tokenizer.nextChar()
     of ' ', '\t':
@@ -833,7 +831,7 @@ proc nextToken*(tokenizer: Tokenizer): Token =
       token = Token(kind: tkIDHash, idHash: tokenizer.consumeName())
     elif not tokenizer.isEof():
       case tokenizer.nextChar()
-      of {'0'..'9'}, '-':
+      of {'0' .. '9'}, '-':
         token = Token(kind: tkHash, hash: tokenizer.consumeName())
       else:
         discard
@@ -860,17 +858,17 @@ proc nextToken*(tokenizer: Tokenizer): Token =
       tokenizer.forwards(1)
       token = Token(kind: tkDelim, delim: '*')
   of '+':
-    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0'..'9'} or
+    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0' .. '9'} or
         tokenizer.hasAtleast(2) and tokenizer.charAt(1) == '.' and
-        tokenizer.charAt(2) in {'0'..'9'}:
+        tokenizer.charAt(2) in {'0' .. '9'}:
       token = tokenizer.consumeNumeric()
     else:
       tokenizer.forwards(1)
       token = Token(kind: tkDelim, delim: '+')
   of '-':
-    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0'..'9'} or
+    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0' .. '9'} or
         tokenizer.hasAtleast(2) and tokenizer.charAt(1) == '.' and
-        tokenizer.charAt(2) in {'0'..'9'}:
+        tokenizer.charAt(2) in {'0' .. '9'}:
       token = tokenizer.consumeNumeric()
     elif tokenizer.startsWith("-->"):
       tokenizer.forwards(3)
@@ -884,7 +882,7 @@ proc nextToken*(tokenizer: Tokenizer): Token =
     tokenizer.forwards(1)
     token = Token(kind: tkComma)
   of '.':
-    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0'..'9'}:
+    if tokenizer.hasAtleast(1) and tokenizer.charAt(1) in {'0' .. '9'}:
       token = tokenizer.consumeNumeric()
     else:
       tokenizer.forwards(1)
@@ -895,7 +893,7 @@ proc nextToken*(tokenizer: Tokenizer): Token =
     else:
       tokenizer.forwards(1)
       token = Token(kind: tkDelim, delim: '/')
-  of {'0'..'9'}:
+  of {'0' .. '9'}:
     token = tokenizer.consumeNumeric()
   of ':':
     tokenizer.forwards(1)
@@ -916,7 +914,7 @@ proc nextToken*(tokenizer: Tokenizer): Token =
       token = Token(kind: tkAtKeyword, at: tokenizer.consumeName())
     else:
       token = Token(kind: tkDelim, delim: '@')
-  of {'a'..'z'}, {'A'..'Z'}, '_', '\0':
+  of {'a' .. 'z'}, {'A' .. 'Z'}, '_', '\0':
     token = tokenizer.consumeIdentLike()
   of '[':
     token = Token(kind: tkSquareBracketBlock)

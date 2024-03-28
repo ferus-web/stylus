@@ -51,10 +51,8 @@ type
     ssLooking
     ssSeenAtleastOne
 
-const
-  PARSE_ERRORS = [
-    tkBadUrl, tkBadString, tkCloseParen, tkCloseSquareBracket, tkCloseCurlyBracket
-  ]
+const PARSE_ERRORS =
+  [tkBadUrl, tkBadString, tkCloseParen, tkCloseSquareBracket, tkCloseCurlyBracket]
 
 type
   Token* = ref object
@@ -133,7 +131,8 @@ proc `$`*(token: Token): string =
       return $token.nIntVal
     else:
       return $token.nValue
-  else: ""
+  else:
+    ""
 
 proc isParseError*(token: Token): bool {.inline, noSideEffect, gcsafe.} =
   token.kind notin PARSE_ERRORS
