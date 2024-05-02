@@ -729,7 +729,7 @@ proc expectFunction*(parser: Parser): Result[void, BasicParseError] {.inline.} =
 proc expectFunctionMatching*(
     parser: Parser, name: string
 ): Result[void, BasicParseError] {.inline.} =
-  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] =
     if token.fnName.toLowerAscii() == name:
       return ok()
 
