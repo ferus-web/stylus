@@ -51,9 +51,6 @@ type
     ssLooking
     ssSeenAtleastOne
 
-  AnB* = object
-    a*, b*: int32
-
 const PARSE_ERRORS =
   [tkBadUrl, tkBadString, tkCloseParen, tkCloseSquareBracket, tkCloseCurlyBracket]
 
