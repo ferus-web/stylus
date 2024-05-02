@@ -52,6 +52,12 @@ type
       custom*: E
 
     location*: SourceLocation
+  
+  ParsedItem* = ref object of RootObj
+  ComponentValue* = ref object of ParsedItem
+
+  Rule* = ref object of ParsedItem
+    prelude*: seq[ComponentValue]
 
   Parser* = ref object
     input*: ParserInput
@@ -353,6 +359,11 @@ proc expectExhausted*(parser: Parser): Result[bool, BasicParseError] =
 
   parser.reset(start)
   res
+
+proc isExhausted*(parser: Parser): bool {.inline.} =
+  parser
+    .expectExhausted()
+    .isOk()
 
 proc position*(parser: Parser): SourcePosition {.inline.} =
   parser.input.tokenizer.position()
@@ -755,3 +766,5 @@ proc expectNoErrorToken*(parser: Parser): Result[void, BasicParseError] {.inline
     else:
       if token.isParseError():
         return err(parser.newBasicUnexpectedTokenError(deepCopy token))
+
+export shared

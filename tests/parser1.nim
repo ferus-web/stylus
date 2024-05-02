@@ -1,7 +1,8 @@
-import results, pretty, stylus/parser
+import std/unittest
+import results, stylus/parser
 
 var input = newParserInput(
-  """
+"""
 h1 {
   this-is-not: "a-real-attribute";
 }
@@ -10,8 +11,9 @@ h1 {
 
 let parserObj = newParser(input)
 
-echo parserObj.expectIdent()
-echo parserObj.expectCurlyBracketBlock()
-echo parserObj.expectIdentMatching("this-is-not")
-echo parserObj.expectColon()
-echo parserObj.expectString().get() == "a-real-attribute"
+test "basic parsing":
+  assert parserObj.expectIdent().get() == "h1"
+  assert parserObj.expectCurlyBracketBlock().isOk
+  assert parserObj.expectIdentMatching("this-is-not").get() == "this-is-not"
+  assert parserObj.expectColon().isOk
+  assert parserObj.expectString().get() == "a-real-attribute"
