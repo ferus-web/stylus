@@ -53,12 +53,6 @@ type
 
     location*: SourceLocation
   
-  ParsedItem* = ref object of RootObj
-  ComponentValue* = ref object of ParsedItem
-
-  Rule* = ref object of ParsedItem
-    prelude*: seq[ComponentValue]
-
   Parser* = ref object
     input*: ParserInput
     atStartOf*: Option[BlockType]
