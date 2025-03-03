@@ -1,6 +1,7 @@
 import std/[sugar, options, strutils, sequtils], results
 
 import ./[shared, tokenizer, utils]
+import pretty
 
 type
   ParseUntilErrorBehaviour* = enum
@@ -218,9 +219,8 @@ proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
   var stack: seq[BlockType]
   stack &= blockType
 
-  var ctk = tokenizer.nextToken()
-
   while not tokenizer.isEof:
+    let ctk = tokenizer.nextToken()
     let closingBk = closing ctk
 
     if &closingBk:
@@ -233,8 +233,6 @@ proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
 
     if &openingBk:
       stack.add(openingBk.unsafeGet())
-
-    ctk = tokenizer.nextToken()
 
 proc skipWhitespace*(parser: Parser) {.inline.} =
   if &parser.atStartOf:
@@ -269,9 +267,8 @@ proc state*(parser: Parser): ParserState {.inline.} =
 proc nextIncludingWhitespaceAndComments*(
     parser: Parser
 ): Result[Token, BasicParseError] =
-  var blockType: BlockType
   if &parser.atStartOf:
-    blockType = parser.atStartOf.get()
+    let blockType = parser.atStartOf.get()
     consumeUntilEndOfBlock(blockType, parser.input.tokenizer)
 
   let c = parser.input.tokenizer.nextChar()
@@ -314,8 +311,8 @@ proc nextIncludingWhitespaceAndComments*(
 
   let cBlockType = closing token
 
-  if &cBlockType:
-    parser.atStartOf = cBlockType
+  #[ if &cBlockType:
+    parser.atStartOf = cBlockType ]#
 
   ok(token)
 
