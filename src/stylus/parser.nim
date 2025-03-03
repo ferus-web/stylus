@@ -215,16 +215,16 @@ proc sourceLocation*(state: ParserState): SourceLocation {.inline.} =
   )
 
 proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
-  var stack = newSeq[BlockType](16)
-  stack.add(blockType)
+  var stack: seq[BlockType]
+  stack &= blockType
 
   var ctk = tokenizer.nextToken()
 
-  while ctk != nil:
+  while not tokenizer.isEof:
     let closingBk = closing ctk
 
     if &closingBk:
-      if stack[-1] == closingBk.unsafeGet():
+      if stack[stack.len - 1] == closingBk.unsafeGet():
         discard pop stack
         if stack.len < 1:
           return
@@ -233,6 +233,8 @@ proc consumeUntilEndOfBlock*(blockType: BlockType, tokenizer: Tokenizer) =
 
     if &openingBk:
       stack.add(openingBk.unsafeGet())
+
+    ctk = tokenizer.nextToken()
 
 proc skipWhitespace*(parser: Parser) {.inline.} =
   if &parser.atStartOf:
@@ -699,6 +701,14 @@ proc expectCurlyBracketBlock*(
     return ok()
 
   expect parser, [tkCurlyBracketBlock], (token: Token) => inner token
+
+proc expectCloseCurlyBracket*(
+    parser: Parser
+): Result[void, BasicParseError] {.inline.} =
+  proc inner(token: Token): Result[void, BasicParseError] {.inline.} =
+    return ok()
+
+  expect parser, [tkCloseCurlyBracket], (token: Token) => inner token
 
 proc expectSquareBracketBlock*(
     parser: Parser
