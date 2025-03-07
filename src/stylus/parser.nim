@@ -267,6 +267,9 @@ proc state*(parser: Parser): ParserState {.inline.} =
 proc nextIncludingWhitespaceAndComments*(
     parser: Parser
 ): Result[Token, BasicParseError] =
+  if parser.input.tokenizer.isEof:
+    return err(parser.newBasicError(bpEndOfInput))
+
   if &parser.atStartOf:
     let blockType = parser.atStartOf.get()
     consumeUntilEndOfBlock(blockType, parser.input.tokenizer)
@@ -275,41 +278,7 @@ proc nextIncludingWhitespaceAndComments*(
   if parser.stopBefore.contains(fromChar(some c)):
     return err(parser.newBasicError(bpEndOfInput))
 
-  let
-    tokenStartPos = parser.input.tokenizer.position()
-    usingCachedToken =
-      if &parser.input.cachedToken:
-        parser.input.cachedToken.unsafeGet().startPos == tokenStartPos
-      else:
-        false
-
-  var token: Token
-
-  if usingCachedToken:
-    let cachedToken = parser.input.cachedToken.unsafeGet()
-      # we already verified that it isn't an empty option, so it's fine (hopefully)
-    parser.input.tokenizer.reset(cachedToken.endState)
-    case cachedToken.token.kind
-    of tkFunction:
-      parser.input.tokenizer.seeFunction(cachedToken.token.fnName)
-    else:
-      discard
-
-    token = cachedToken.token
-  else:
-    let newToken = parser.input.tokenizer.nextToken()
-
-    parser.input.cachedToken = some(
-      CachedToken(
-        token: newToken,
-        startPos: tokenStartPos,
-        endState: parser.input.tokenizer.state(),
-      )
-    )
-
-    token = newToken
-
-  let cBlockType = closing token
+  let token = parser.input.tokenizer.nextToken()
 
   #[ if &cBlockType:
     parser.atStartOf = cBlockType ]#
