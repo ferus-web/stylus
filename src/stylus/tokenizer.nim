@@ -965,6 +965,9 @@ proc nextToken*(tokenizer: Tokenizer): Token =
     else:
       tokenizer.forwards(1)
       token = Token(kind: tkDelim, delim: '~')
+  of '>':
+    tokenizer.forwards(1)
+    token = Token(kind: tkDelim, delim: '>')
   else:
     if not c.isAlphaAscii():
       token = tokenizer.consumeIdentLike()
