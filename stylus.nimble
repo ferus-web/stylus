@@ -1,11 +1,10 @@
 # Package
 
-version       = "0.1.3"
-author        = "xTrayambak"
-description   = "A CSS level 3 parser"
-license       = "MIT"
-srcDir        = "src"
-
+version = "0.1.4"
+author = "xTrayambak"
+description = "A CSS level 3 parser"
+license = "MIT"
+srcDir = "src"
 
 # Dependencies
 
