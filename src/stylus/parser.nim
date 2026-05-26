@@ -53,7 +53,7 @@ type
       custom*: E
 
     location*: SourceLocation
-  
+
   Parser* = ref object
     input*: ParserInput
     atStartOf*: Option[BlockType]
@@ -301,7 +301,7 @@ proc expect*[T](
   if next.isOk:
     let value {.inject.} = next.get()
     if value.kind notin wants:
-      return err(start.newBasicUnexpectedTokenError(deepCopy value))
+      return err(start.newBasicUnexpectedTokenError(value))
     else:
       return fn(value)
   else:
@@ -323,9 +323,7 @@ proc expectExhausted*(parser: Parser): Result[bool, BasicParseError] =
   res
 
 proc isExhausted*(parser: Parser): bool {.inline.} =
-  parser
-    .expectExhausted()
-    .isOk()
+  parser.expectExhausted().isOk()
 
 proc position*(parser: Parser): SourcePosition {.inline.} =
   parser.input.tokenizer.position()
@@ -340,11 +338,7 @@ proc newErrorForNextToken*(parser: Parser): ParseError {.inline.} =
 
   let token =
     if t.isOk:
-      deepCopy(t)
-
-  let err =
-    if t.isErr:
-      t.error()
+      t.get()
 
   parser.newError(BasicParseError(kind: bpUnexpectedToken, token: token))
 
@@ -477,7 +471,7 @@ proc expectWhitespace*(parser: Parser): Result[string, BasicParseError] {.inline
   of tkWhitespace:
     return ok(next.wsStr)
   else:
-    err(start.newBasicUnexpectedTokenError(deepCopy next))
+    err(start.newBasicUnexpectedTokenError(next))
 
 proc parseNestedBlock*[T, E](
     parser: Parser, parse: proc(parser: Parser): Result[T, E]
@@ -735,6 +729,6 @@ proc expectNoErrorToken*(parser: Parser): Result[void, BasicParseError] {.inline
         return ok()
     else:
       if token.isParseError():
-        return err(parser.newBasicUnexpectedTokenError(deepCopy token))
+        return err(parser.newBasicUnexpectedTokenError(token))
 
 export shared
