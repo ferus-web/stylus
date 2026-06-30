@@ -1,7 +1,6 @@
 import std/[sugar, options, strutils, sequtils], results
 
 import ./[shared, tokenizer, utils]
-import pretty
 
 type
   ParseUntilErrorBehaviour* = enum
