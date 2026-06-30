@@ -1,7 +1,7 @@
 [package]
 name = "stylus"
 description = "A CSS level 3 parser"
-version = "0.1.4"
+version = "0.1.5"
 license = "MIT"
 kind = "Library"
 backend = "C"
